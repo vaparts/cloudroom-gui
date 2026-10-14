@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "noEmit": true,
+    "skipLibCheck": true,
+    "paths": {
+      "@get-bb/plugin-sdk": [
+        "../../packages/plugin-sdk/bundled-types/bb-plugin-sdk.d.ts"
+      ],
+      "@get-bb/plugin-sdk/provider-bridge": [
+        "../../packages/plugin-sdk/bundled-types/bb-plugin-sdk-provider-bridge.d.ts"
+      ],
+      "@get-bb/plugin-sdk/provider-bridge/testing": [
+        "../../packages/plugin-sdk/bundled-types/bb-plugin-sdk-provider-bridge-testing.d.ts"
+      ],
+      "@get-bb/plugin-sdk/testing": [
+        "../../packages/plugin-sdk/bundled-types/bb-plugin-sdk-testing.d.ts"
+      ]
+    },
+    "types": ["node"]
+  },
+  "include": ["*.ts", "src", "test"]
+}

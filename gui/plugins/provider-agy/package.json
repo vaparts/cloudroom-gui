@@ -1,0 +1,36 @@
+{
+  "name": "bb-plugin-provider-agy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Run Cloudroom threads with Google's Antigravity CLI (agy).",
+  "engines": {
+    "bb": ">=0.0"
+  },
+  "bb": {
+    "name": "Antigravity provider",
+    "description": "Run Cloudroom threads with Google's Antigravity CLI (agy).",
+    "branding": {
+      "icon": "Zap"
+    },
+    "server": "./server.ts",
+    "host": "./host.ts"
+  },
+  "keywords": [
+    "bb-plugin"
+  ],
+  "scripts": {
+    "test": "vitest run --config vitest.config.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@get-bb/plugin-sdk": "workspace:*",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "typescript-7": "npm:typescript@^7.0.2",
+    "vitest": "^4.1.1"
+  }
+}

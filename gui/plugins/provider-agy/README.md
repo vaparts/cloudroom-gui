@@ -36,6 +36,15 @@ Models come from `agy models`. agy lists one id per effort
 `--effort`, so the picker shows base models and the reasoning level becomes
 `--effort`. Older threads that stored a suffixed id keep working.
 
+## Install and update
+
+Cloudroom shows agy in Settings and in `room-cli updates` like its other
+providers. The current version comes from `agy --version`; the latest from
+Google's update manifest, the same one the official installer reads (cached
+for an hour). Install runs the official script
+(`https://antigravity.google/cli/install.sh`); Update runs `agy update`.
+agy also updates itself in the background, so it is often already current.
+
 ## Terms of use
 
 The plugin only starts Google's own `agy` binary, which signs in with its own
@@ -63,7 +72,7 @@ review them before use: https://antigravity.google/terms
 - `instructionMode: "replace"` is treated as append; agy's own system prompt
   cannot be replaced.
 - Text input only; agy's stream-json input accepts text blocks.
-- No fork, manual compaction, usage limits or in-app installation.
+- No fork, manual compaction or usage limits.
 - Health reports installation and version only: agy has no auth-status
   command, and `agy models` answers without a sign-in. A missing sign-in
   surfaces as agy's own error when a thread starts.
@@ -111,5 +120,7 @@ instructions, maintenance requests, and a public-SDK-only import guard.
 | `src/provider-bridge.ts` | the bridge                                        |
 | `src/vocabulary.ts`      | ids, models and efforts                           |
 | `src/instructions.ts`    | Cloudroom instructions block and sent-hash record |
+| `src/agy-cli.ts`         | finds and runs the agy executable                 |
+| `src/maintenance.ts`     | health, install and update status                 |
 | `skills/agy-provider/`   | agent-facing notes on using this provider         |
 | `test/`                  | harness and the fake agy                          |

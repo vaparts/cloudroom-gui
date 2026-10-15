@@ -146,7 +146,6 @@ function requireSwitchableThread(
   return thread;
 }
 
-/** The conversation so far, as hidden input for the new harness: a short note with the latest messages, plus the full history as a file. */
 async function historySeed(
   deps: LoggedPendingInteractionWorkSessionDeps,
   thread: Thread,
@@ -156,12 +155,26 @@ async function historySeed(
     getLatestCompletedThreadContextClearSequence(deps.db, {
       threadId: thread.id,
     }) ?? undefined;
-  const messages = threadMessages(deps.db, thread.id, { after });
+  return messagesSeed(
+    deps.config.dataDir,
+    thread.projectId,
+    threadMessages(deps.db, thread.id, { after }),
+    `[Cloudroom] This conversation started with another agent (${thread.providerId}). You are now continuing it as ${to}.`,
+  );
+}
+
+/** The conversation so far, as hidden input for a fresh session: a short note with the latest messages, plus the full history as a file. */
+export async function messagesSeed(
+  dataDir: string,
+  projectId: string,
+  messages: readonly ThreadMessage[],
+  intro: string,
+): Promise<PromptInput[]> {
   if (messages.length === 0) return [];
   const full = transcriptMarkdown(fit(messages, FILE_CHARS));
   const file = await storeAttachment(
-    deps.config.dataDir,
-    thread.projectId,
+    dataDir,
+    projectId,
     new File([`# Conversation so far\n\n${full}\n`], HISTORY_FILE, {
       type: "text/markdown",
     }),
@@ -171,7 +184,7 @@ async function historySeed(
     {
       type: "text",
       text: [
-        `[Cloudroom] This conversation started with another agent (${thread.providerId}). You are now continuing it as ${to}.`,
+        intro,
         `The full conversation so far is in the attached ${HISTORY_FILE}: user messages and agent replies, without tool output. Read it before you reply, treat it as your own history, check the workspace for the current state, and don't redo finished work.`,
         `The latest messages:\n\n${tail}`,
         "The user's new message follows.",

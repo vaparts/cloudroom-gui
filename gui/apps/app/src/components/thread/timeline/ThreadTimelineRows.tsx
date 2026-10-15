@@ -2214,8 +2214,13 @@ function ThreadTimelineRowsForTimelineView(props: ThreadTimelineRowsProps) {
   const timelineThreadId = props.threadId;
   const hasPluginSelectionActions =
     timelineThreadId !== undefined && messageActionSlots.length > 0;
+  const onSelectionForkMessage = props.canSpawnChild
+    ? props.onForkMessage
+    : undefined;
   const hasSelectionActions =
-    onSelectionAddToChat !== undefined || hasPluginSelectionActions;
+    onSelectionAddToChat !== undefined ||
+    hasPluginSelectionActions ||
+    onSelectionForkMessage !== undefined;
   const [activeSelection, setActiveSelection] = useState<{
     rowId: string;
     selection: MessageProseSelection;
@@ -2258,6 +2263,19 @@ function ThreadTimelineRowsForTimelineView(props: ThreadTimelineRowsProps) {
   );
   const selectionAddToChatHandler =
     onSelectionAddToChat === undefined ? undefined : handleSelectionAddToChat;
+  const selectionSourceSeqEnd = activeSelection?.selection.sourceSeqEnd;
+  const handleSelectionFork =
+    onSelectionForkMessage === undefined ||
+    activeSelection === null ||
+    selectionSourceSeqEnd === undefined
+      ? undefined
+      : () =>
+          resolveMessageNumber(activeSelection.rowId, (messageNumber) =>
+            onSelectionForkMessage({
+              sourceSeqEnd: selectionSourceSeqEnd,
+              context: { text: activeSelection.selection.text, messageNumber },
+            }),
+          );
   const onOpenPluginPanel = props.onOpenPluginPanel;
   const selectionPluginActions = useMemo<
     readonly ThreadTimelinePluginMessageAction[]
@@ -2413,6 +2431,7 @@ function ThreadTimelineRowsForTimelineView(props: ThreadTimelineRowsProps) {
                               resolveMessageNumber,
                             )
                       }
+                      onFork={handleSelectionFork}
                       pluginActions={selectionPluginActions}
                       onDismiss={dismissSelection}
                     />

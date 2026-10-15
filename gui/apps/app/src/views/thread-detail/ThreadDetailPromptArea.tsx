@@ -508,6 +508,7 @@ export function ThreadDetailPromptArea({
     useLatestRef<readonly ThreadQueuedMessage[]>(queuedMessages);
   const [bottomPluginFocusNonce, setBottomPluginFocusNonce] = useState(0);
   const [editFocusNonce, setEditFocusNonce] = useState(0);
+  const [dismissedCloudStatus, setDismissedCloudStatus] = useState<string | null>(null);
   const focusBottomPluginComposer = useCallback(() => {
     setBottomPluginFocusNonce((nonce) => nonce + 1);
   }, []);
@@ -733,7 +734,7 @@ export function ThreadDetailPromptArea({
     initialEnvironmentSelectionValue: thread.environmentId ?? undefined,
   });
   const cloudFollowUpReasoningOptions = useMemo(() => {
-    const levels = thread.providerId === "acp-cursor" || thread.providerId === "acp-fx" || thread.providerId === "acp-opencode" || thread.providerId === "acp-hermes-agent" ? [cloudReasoning] : cloudReasoningLevels(cloudConnection.data, thread.providerId, cloudState.data?.model);
+    const levels = thread.providerId.startsWith("acp-") ? [cloudReasoning] : cloudReasoningLevels(cloudConnection.data, thread.providerId, cloudState.data?.model);
     return [...new Set([cloudReasoning, ...levels])].flatMap((level) => {
       const parsed = reasoningLevelSchema.safeParse(level);
       return parsed.success ? [{ value: parsed.data, label: reasoningLevelLabel(parsed.data, undefined) }] : [];
@@ -2136,6 +2137,8 @@ export function ThreadDetailPromptArea({
   const cloudReconnecting = !cloudError && (cloudOffline || cloudState.data?.reconnecting);
   const cloudLimitNotice = isCloud && !shouldHideComposer ? cloudState.data?.usageLimit ? <CloudUsageLimitNotice /> : cloudState.data?.diskFull ? <CloudDiskFullNotice /> : null : null;
   const cloudFixPrompt = cloudError || cloudState.data?.failedStart ? cloudThreadFixPrompt(thread.id, thread.providerId, cloudError) : null;
+  const cloudStatusKey = `${thread.id}|${cloudState.data?.failedStart ? "failed" : ""}|${cloudError ?? ""}`;
+  const cloudStatusDismissed = dismissedCloudStatus === cloudStatusKey;
   const cloudAuthNotice = isCloud && !shouldHideComposer && cloudState.data?.authRequired ? (
     <PromptStackCard ariaLabel="Connect your account" className="w-full max-w-sm justify-self-center p-3 text-xs">
       {claudeThread ? <ClaudeSignIn target={{ target: "cloud" }} onContinue={() => retryCloudStart.mutate()} continuing={retryCloudStart.isPending} /> : (
@@ -2162,8 +2165,8 @@ export function ThreadDetailPromptArea({
   const cloudGithubNotice = isCloud && !shouldHideComposer && cloudState.data?.failedStart && cloudConnection.data?.githubRequired ? <CloudGithubCard /> : null;
   const cloudNotice = cloudAuthNotice ?? cloudLimitNotice ?? cloudGithubNotice ?? (isCloud && !shouldHideComposer && (cloudError || cloudReconnecting || cloudState.data?.failedStart) ? (<>
     {cloudReconnectingPill}
-    {(cloudError || cloudState.data?.failedStart) && <PromptStackCard ariaLabel="Cloud thread status" className="space-y-2 p-3 text-xs">
-      {cloudError && <div role="alert" className="whitespace-pre-wrap break-words text-destructive">{cloudError}</div>}
+    {(cloudError || cloudState.data?.failedStart) && !cloudStatusDismissed && <PromptStackCard ariaLabel="Cloud thread status" className="space-y-2 p-3 text-xs" onDismiss={() => setDismissedCloudStatus(cloudStatusKey)}>
+      {cloudError && <div role="alert" className="whitespace-pre-wrap break-words pr-6 text-destructive">{cloudError}</div>}
       <div className="flex items-center gap-2">
         {cloudState.data?.failedStart && <Button type="button" size="sm" variant="outline" disabled={retryCloudStart.isPending} onClick={() => retryCloudStart.mutate()}>Retry start</Button>}
         {cloudState.isError && !cloudFetchFailed && <Button type="button" size="sm" variant="outline" disabled={cloudState.isFetching} onClick={() => void cloudState.refetch()}>Reconnect</Button>}

@@ -9,7 +9,7 @@ import { useHostDaemon } from "@/hooks/useHostDaemon";
 import { getProviderIconInfo, getProviderIconTintStyle } from "@/lib/provider-icon";
 
 export const DAY_MS = 86_400_000;
-const APPS = [["claude-code", "Claude Code"], ["codex", "Codex"]] as const;
+const APPS = [["claude-code", "Claude Code"], ["codex", "Codex"], ["pi", "Pi"], ["acp-hermes-agent", "Hermes"]] as const;
 export const RANGES = [["last 7 days", 7], ["last 30 days", 30], ["all time", null]] as const;
 export const PALETTE = {
   "--ic-ink": "var(--ob-ink, var(--foreground))",
@@ -44,7 +44,7 @@ export function Chip({ children, menu }: { children: ReactNode; menu: ReactNode 
   );
 }
 
-export function ImportChats({ onDone }: { onDone?: () => void }) {
+export function ImportChats({ onDone, empty }: { onDone?: () => void; empty?: ReactNode }) {
   const sessions = useNativeSessions();
   const importSessions = useImportSessions();
   const { localHostId } = useHostDaemon();
@@ -55,7 +55,7 @@ export function ImportChats({ onDone }: { onDone?: () => void }) {
   if (sessions.error) return <p role="alert" className="text-sm text-destructive">{sessions.error.message}</p>;
   const list = sessions.data.sessions;
   const apps = APPS.filter(([id]) => list.some((session) => session.harness === id));
-  if (!apps.length) return <p className="text-sm text-(--ic-muted)" style={PALETTE}>No new Claude Code or Codex chats on this Mac.</p>;
+  if (!apps.length) return empty ?? <p className="text-sm text-(--ic-muted)" style={PALETTE}>No new agent chats on this Mac.</p>;
 
   const recent = list.filter((session) => days === null || Date.now() - session.updatedAt < days * DAY_MS);
   const picked = apps.filter(([id]) => !off.has(id));
@@ -69,7 +69,7 @@ export function ImportChats({ onDone }: { onDone?: () => void }) {
   });
   const appMenu = apps.map(([id, name]) => (
     <DropdownMenuCheckboxItem key={id} checked={!off.has(id)} disabled={!off.has(id) && picked.length === 1} onCheckedChange={(on) => toggle(id, on === true)}>
-      {name} · {count(id)} chats
+      {name} · {count(id)} chats{id === "acp-hermes-agent" && " · text only"}
     </DropdownMenuCheckboxItem>
   ));
   const rangeMenu = RANGES.map(([label, value]) => (
@@ -96,7 +96,7 @@ export function ImportChats({ onDone }: { onDone?: () => void }) {
         Import my{" "}
         {picked.map(([id, name], index) => (
           <span key={id}>
-            {index > 0 && " and "}
+            {index > 0 && (index === picked.length - 1 ? " and " : ", ")}
             <Chip menu={appMenu}><AppLogo id={id} />{name}</Chip>
           </span>
         ))}{" "}
@@ -124,7 +124,7 @@ export function ImportChatsSettingsSection() {
   return (
     <SettingsSection
       title="Import chats"
-      description="Bring your Claude Code and Codex chats over as Local threads. The agent keeps its full memory, and your originals stay untouched."
+      description="Bring your Claude Code, Codex, Pi, and Hermes chats over as Local threads. The agent keeps its full memory, except Hermes, which gets the messages as text. Your originals stay untouched."
     >
       <ImportChats />
     </SettingsSection>

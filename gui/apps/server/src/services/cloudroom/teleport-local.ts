@@ -300,7 +300,7 @@ async function cloudChanges(client: CloudroomClient, workspace: string, localHea
   }
 }
 
-async function applyChanges(root: string, archive: Buffer, id: string, base: string | null): Promise<number> {
+export async function applyChanges(root: string, archive: Buffer, id: string, base: string | null): Promise<number> {
   const real = await realpath(root);
   const aside = join(root, ".cloudroom", "teleport", id);
   if (!(await inside(real, join(aside, "file"))))

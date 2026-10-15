@@ -15,6 +15,7 @@ import {
   THREAD_HARNESS_SWITCH_OPERATION,
   THREAD_IMPORT_OPERATION,
   threadScope,
+  type PromptInput,
   type Thread,
   type ThreadEvent,
   type ThreadEventType,
@@ -327,6 +328,30 @@ export function recordImportFork(
           status: "completed",
           message: `Imported from session ${sourceProviderThreadId}.`,
           metadata: { sourceProviderThreadId },
+        },
+      }),
+    { behavior: "immediate" },
+  );
+}
+
+export function recordTextImport(
+  deps: Pick<AppDeps, "db">,
+  thread: Pick<Thread, "environmentId" | "id">,
+  seed: PromptInput[],
+): void {
+  deps.db.transaction(
+    (tx) =>
+      appendThreadEventInTransaction(tx, {
+        threadId: thread.id,
+        environmentId: thread.environmentId,
+        type: "system/operation",
+        scope: threadScope(),
+        data: {
+          operation: THREAD_IMPORT_OPERATION,
+          operationId: createEventId(),
+          status: "completed",
+          message: "Imported as text.",
+          metadata: { seed },
         },
       }),
     { behavior: "immediate" },

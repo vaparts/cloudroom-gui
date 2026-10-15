@@ -79,8 +79,8 @@ export function registerImportCommands(program: Command, getUrl: () => string): 
       for (const thread of result.skipped) console.log(`Skipped   ${thread.title}: ${thread.reason}`);
       if (!result.imported.length && !result.skipped.length) console.log("No open BB threads found.");
     }));
-  for (const [harness, app] of [["claude-code", "Claude Code"], ["codex", "Codex"]] as const) {
-    group.command(harness).description(`Copy recent ${app} chats from this Mac into idle Local threads with their messages. Sends no prompts; ${app} is never changed.`)
+  for (const [command, harness, app] of [["claude-code", "claude-code", "Claude Code"], ["codex", "codex", "Codex"], ["pi", "pi", "Pi"], ["hermes", "acp-hermes-agent", "Hermes Agent"]] as const) {
+    group.command(command).description(`Copy recent ${app} chats from this Mac into idle Local threads with their messages.${harness === "acp-hermes-agent" ? " Text only: the agent reads the old messages instead of resuming the session." : ""} Sends no prompts; ${app} is never changed.`)
       .option("--days <days>", "Only chats active in the last N days", "30")
       .option("--dry-run", "List the chats without importing them")
       .option("--json", "Print JSON")

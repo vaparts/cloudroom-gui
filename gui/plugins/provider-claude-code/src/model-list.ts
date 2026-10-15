@@ -16,6 +16,7 @@ import {
   cloneReasoningEfforts,
   type ClaudeCodeCatalogEntry,
 } from "./model-catalog.js";
+import { claudeModelLabel } from "./model-catalog-data.js";
 
 const SONNET_REASONING_EFFORTS: readonly ModelReasoningEffort[] = [
   LOW_REASONING_EFFORT,
@@ -205,12 +206,23 @@ function buildDiscoveredModel(modelInfo: ModelInfo): AvailableModel {
   return {
     id: model,
     model,
-    displayName: modelInfo.displayName,
+    displayName: versionedDisplayName(modelInfo),
     description: modelInfo.description,
     supportedReasoningEfforts,
     defaultReasoningEffort,
     isDefault: false,
   };
+}
+
+function versionedDisplayName(modelInfo: ModelInfo): string {
+  const fromId = claudeModelLabel(modelInfo.resolvedModel ?? modelInfo.value);
+  if (fromId) return fromId;
+  const lead = modelInfo.description.split(" · ")[0] ?? "";
+  const version = lead.slice(modelInfo.displayName.length + 1);
+  return lead.startsWith(`${modelInfo.displayName} `) &&
+    /^\d+(\.\d+)*$/u.test(version)
+    ? lead
+    : modelInfo.displayName;
 }
 
 function modelIsDiscovered(
@@ -272,7 +284,18 @@ export function buildClaudeCodeModels(
     (entry) =>
       modelIsDiscovered(entry.model, discoveredModels) &&
       !models.some((model) => model.model === entry.model),
-  ).map(buildCatalogModel);
+  ).map((entry) => {
+    const resolved = discoveredModels.find(
+      (discovered) => discovered.value === entry.model,
+    )?.resolvedModel;
+    const aliasName =
+      resolved && !entry.model.startsWith("claude-")
+        ? claudeModelLabel(resolved, "alias")
+        : null;
+    return buildCatalogModel(
+      aliasName ? { ...entry, displayName: aliasName } : entry,
+    );
+  });
   return {
     models: markDefaultModel(models, discoveredModels),
     selectedOnlyModels,

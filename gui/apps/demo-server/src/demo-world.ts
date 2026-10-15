@@ -264,6 +264,7 @@ export class DemoWorld {
       case "child-summary":
         return json({
           nonDeletedChildCount: 0,
+          runningThreadCount: 0,
         } satisfies ThreadChildSummaryResponse);
       default:
         return null;

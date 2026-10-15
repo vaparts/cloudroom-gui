@@ -194,9 +194,7 @@ patterns, settingsSection optional title, navPanel path,
 fileOpener extensions, and content-script ids/mount functions) and returns
 them typed with defaults filled. `mountPluginContentScripts` mirrors ordered
 mount, abort-before-cleanup, reverse rollback, exact-once disposal, and
-per-window instances. Working examples:
-`examples/plugins/slack-bot/server.test.ts` (webhook → kv → recorded spawn →
-`thread.idle` reply), `plugins/docs/app.test.tsx` (nav
+per-window instances. Working example: `plugins/docs/app.test.tsx` (nav
 panel list over rpc + create/open navigation assertions).
 
 Fidelity boundaries: HTTP auth is recorded but not enforced; services and

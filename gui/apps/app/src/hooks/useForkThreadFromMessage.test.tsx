@@ -10,6 +10,7 @@ import {
   type ForkThreadCreateSeed,
 } from "@cloudroom/client-core";
 import { getRootComposeRoutePath } from "@/lib/route-paths";
+import { getPromptDraftAccessor } from "@/hooks/usePromptDraftStorage";
 import { RouteNavigationProvider } from "@/components/ui/app-route-anchor";
 import { useForkThreadFromMessage } from "./useForkThreadFromMessage";
 
@@ -80,7 +81,7 @@ function Wrapper({ children }: { children: ReactNode }) {
 }
 
 describe("useForkThreadFromMessage", () => {
-  it("opens the root composer with the source thread display title in the fork seed", async () => {
+  it("opens the root composer with the fork seed and the selected text quoted", async () => {
     mocks.fetchQuery.mockResolvedValue({
       model: "gpt-5",
       permissionMode: "accept-edits",
@@ -97,9 +98,16 @@ describe("useForkThreadFromMessage", () => {
     );
 
     await act(async () => {
-      await result.current({ sourceSeqEnd: 12 });
+      await result.current({
+        sourceSeqEnd: 12,
+        context: { text: "fork from here", messageNumber: 4 },
+      });
     });
 
+    expect(getPromptDraftAccessor({ kind: "new-thread" }).getCurrent()).toMatchObject({
+      text: "<context> [message #4 - 3 words] </context>\n\n",
+      contexts: [{ label: "[message #4 - 3 words]", text: "fork from here" }],
+    });
     expect(mocks.setRootComposeProjectId).toHaveBeenCalledWith("proj_source");
     expect(mocks.navigate).toHaveBeenCalledWith(getRootComposeRoutePath(), {
       state: expect.objectContaining({

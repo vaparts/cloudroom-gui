@@ -1005,6 +1005,7 @@ it.each(["codex", "pi"])("edits and cancels queued Cloud %s prompts, then steers
     }
     if (holdPrompts && String(req.url).endsWith("/prompts")) return json({ error: "waking" }, 503);
     if (String(req.url).endsWith("/edit") && body.text === "rejected edit") return json({ error: "already dispatched" }, 409);
+    if (String(req.url).endsWith("/steer") && String(body.text).includes("too late")) return json({ error: "steer target is no longer the active request", code: "request_rejected" }, 409);
     const path = String(req.url ?? "");
     const command = path.endsWith("/prompts") ? "prompt" : path.split("/").pop() ?? "unknown";
     const receipt = { request_id: body.request_id, command, state: "accepted", input: body };
@@ -1062,6 +1063,14 @@ it.each(["codex", "pi"])("edits and cancels queued Cloud %s prompts, then steers
     await expect.poll(() => service.queue(thread.id)).toEqual([]);
     expect((await request(`/threads/${thread.id}/send`, { requestId: "steer-1", mode: "steer", input: [{ type: "text", text: "course correct", mentions: [] }] })).status).toBe(200);
     await expect.poll(() => commands.some((item) => (item as { url?: string }).url?.endsWith("/steer"))).toBe(true);
+    // A refused steer, here because its turn just ended, is queued instead of blocking every command behind it.
+    expect((await request(`/threads/${thread.id}/send`, { requestId: "steer-late", mode: "steer", input: [{ type: "text", text: "too late", mentions: [] }] })).status).toBe(200);
+    await expect.poll(() => commands.some((item) => { const sent = item as { url?: string; text?: string }; return Boolean(sent.url?.endsWith("/prompts") && sent.text?.includes("too late")); })).toBe(true);
+    expect(command(harness.db, "steer-late")?.state).toBe("failed");
+    const late = service.queue(thread.id);
+    expect(late).toHaveLength(1);
+    expect((await request(`/threads/${thread.id}/queued-messages/${late[0]!.id}`, undefined, "DELETE")).status).toBe(200);
+    await expect.poll(() => service.queue(thread.id)).toEqual([]);
     record("state", { state: "idle" });
     await expect.poll(() => getThread(harness.db, thread.id)?.status).toBe("idle");
     expect((await request(`/threads/${thread.id}/compact`, {})).status).toBe(200);

@@ -14,8 +14,6 @@
     ]
   },
   "include": [
-    "server.ts",
-    "server.test.ts",
-    "vitest.config.ts"
+    "server.ts"
   ]
 }

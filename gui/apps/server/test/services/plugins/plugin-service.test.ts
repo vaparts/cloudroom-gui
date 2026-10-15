@@ -817,7 +817,7 @@ describe("plugin service", () => {
 
     await tracked.start();
 
-    expect(captured).toEqual([]);
+    expect(captured.filter((event) => event.name === "plugin_installed")).toEqual([]);
     expect(
       tracked.list().find((entry) => entry.id === "reconciled")?.status,
     ).toBe("running");

@@ -622,8 +622,6 @@
       "passThroughEnv": [
         "BB_PROVIDER_CORPUS_DIR",
         "BB_PROVIDER_CORPUS_SNAPSHOT",
-        "BB_PROVIDER_CORPUS_SNAPSHOT_DIR",
-        "BB_PROVIDER_CORPUS_ALLOWLIST",
         "BB_PROVIDER_CORPUS_ROW_CLASSES"
       ]
     },

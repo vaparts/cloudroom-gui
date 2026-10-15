@@ -22,7 +22,6 @@ export * from "./html-escape.js";
 export * from "./item-presentation.js";
 export * from "./json-value.js";
 export * from "./legacy-image-generation.js";
-export * from "./lifecycle-diagram.js";
 export * from "./number-utils.js";
 export * from "./pending-interactions.js";
 export * from "./legacy-thread-events.js";

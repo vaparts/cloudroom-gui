@@ -4176,11 +4176,17 @@ describe("bridge", () => {
 
         await getLatestQueryCall().prompt[Symbol.asyncIterator]().return?.();
 
+        const turnParams = canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "loosen permissions" }],
+        });
         bridge.sendRequest(2, testCase.method, {
-          ...canonicalTurnParams({
-            threadId,
-            input: [{ type: "text", text: "loosen permissions" }],
-          }),
+          ...turnParams,
+          options: {
+            ...(turnParams.options as Record<string, JsonValue>),
+            permissionMode: "auto",
+            approvalReviewer: "automatic",
+          },
           ...(testCase.method === "turn/steer"
             ? { expectedTurnId: "turn-1" }
             : {}),

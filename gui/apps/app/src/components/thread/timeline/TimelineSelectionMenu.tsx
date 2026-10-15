@@ -30,6 +30,7 @@ interface SelectionAction {
 export interface TimelineSelectionMenuProps {
   selection: MessageProseSelection | null;
   onAddToChat?: (text: string) => void;
+  onFork?: () => void;
   pluginActions?: readonly ThreadTimelinePluginMessageAction[];
   onDismiss: () => void;
 }
@@ -107,6 +108,7 @@ function ActionButton({
 export function TimelineSelectionMenu({
   selection,
   onAddToChat,
+  onFork,
   pluginActions = [],
   onDismiss,
 }: TimelineSelectionMenuProps) {
@@ -151,11 +153,14 @@ export function TimelineSelectionMenu({
       ? [
           {
             icon: "ArrowTurnDown" as const,
-            label: "Include context",
+            label: "Reply",
             onSelect: (currentSelection: MessageProseSelection) =>
               onAddToChat(currentSelection.text),
           },
         ]
+      : []),
+    ...(onFork
+      ? [{ icon: "Fork" as const, label: "Fork", onSelect: onFork }]
       : []),
     ...pluginActions.map((action) => ({
       icon: "MessageSquarePlus" as const,

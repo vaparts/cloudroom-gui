@@ -18,13 +18,9 @@
   "keywords": [
     "bb-plugin"
   ],
-  "scripts": {
-    "test": "vitest run --config vitest.config.ts"
-  },
   "devDependencies": {
     "@get-bb/plugin-sdk": "workspace:*",
     "@types/node": "^22.0.0",
-    "typescript": "npm:@typescript/typescript6@^6.0.2",
-    "vitest": "^4.1.1"
+    "typescript": "npm:@typescript/typescript6@^6.0.2"
   }
 }

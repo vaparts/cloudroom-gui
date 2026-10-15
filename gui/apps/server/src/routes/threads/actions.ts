@@ -542,10 +542,14 @@ export function registerThreadActionRoutes(app: Hono, deps: AppDeps): void {
     });
   });
 
-  post(routes.unarchive, (context) => {
+  post(routes.unarchive, (context, query) => {
     const thread = requirePublicThread(deps.db, context.req.param("id"));
     const providerThreadId = getLastProviderThreadId(deps, thread.id);
-    const unarchivedThread = unarchiveThreadAsTopLevel(deps, thread.id);
+    const unarchivedThread = unarchiveThreadAsTopLevel(
+      deps,
+      thread.id,
+      query.keepParent === "true",
+    );
     if (unarchivedThread !== null) {
       if (isCloudThread(unarchivedThread)) void cloudroom(deps).restore(unarchivedThread.id).catch((error: unknown) => deps.logger.warn({ threadId: unarchivedThread.id, error: error instanceof Error ? error.message : String(error) }, "The thread's sandbox could not be restored"));
       if (!isCloudThread(unarchivedThread) && unarchivedThread.environmentId !== null)

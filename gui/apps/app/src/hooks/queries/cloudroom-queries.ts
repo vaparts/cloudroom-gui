@@ -1,7 +1,7 @@
 import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import { deriveProjectNameFromPath, reasoningLevelSchema, serviceTierSchema, type ReasoningLevel, type Thread } from "@cloudroom/domain";
-import type { MacAccessLevel, RepoSuggestion } from "@cloudroom/sdk/browser";
+import type { MacAccessLevel, NativeSession, RepoSuggestion } from "@cloudroom/sdk/browser";
 import type { ProjectSelectorSuggestions } from "@/components/pickers/ProjectSelector";
 import { usePathPickerHost } from "@/hooks/useLocalPathPicker";
 import { useSetRootComposeProjectId } from "@/lib/root-compose-selection";
@@ -48,14 +48,14 @@ export const cloudroomStatusSchema = z.object({
   })).nullable().default([]),
 });
 
-const CORE_HARNESS_IDS: Record<string, string> = { "acp-cursor": "cursor", "acp-fx": "fx", "acp-opencode": "opencode", "acp-hermes-agent": "hermes" };
+const CORE_HARNESS_IDS: Record<string, string> = { "acp-cursor": "cursor", "acp-fx": "fx", "acp-opencode": "opencode", "acp-hermes-agent": "hermes", "acp-devin": "devin" };
 
 export function cloudHarness(status: z.infer<typeof cloudroomStatusSchema> | undefined, harness: string | undefined) {
   const id = harness === undefined ? undefined : (CORE_HARNESS_IDS[harness] ?? harness);
   return status?.harnesses?.find((item) => item.id === id);
 }
 
-const CLOUD_HARNESS_IDS = new Set(["claude-code", "codex", "pi", "fx", "opencode", "hermes"]);
+const CLOUD_HARNESS_IDS = new Set(["claude-code", "codex", "pi", "fx", "opencode", "hermes", "devin"]);
 export function cloudCanRunHarness(harness: string): boolean {
   return CLOUD_HARNESS_IDS.has(CORE_HARNESS_IDS[harness] ?? harness);
 }
@@ -65,7 +65,7 @@ export function cloudCatalogKnown(status: z.infer<typeof cloudroomStatusSchema> 
   return status?.ready === true && status.harnesses !== null;
 }
 
-const HARNESS_NAMES: Record<string, string> = { "claude-code": "Claude Code", codex: "Codex", pi: "Pi", cursor: "Cursor", fx: "fx", opencode: "opencode", hermes: "Hermes Agent" };
+const HARNESS_NAMES: Record<string, string> = { "claude-code": "Claude Code", codex: "Codex", pi: "Pi", cursor: "Cursor", fx: "fx", opencode: "opencode", hermes: "Hermes Agent", devin: "Devin" };
 export function cloudHarnessNames(status: z.infer<typeof cloudroomStatusSchema> | undefined): string {
   // Cursor stays off in Cloud (ADR 0161), even where a sandbox still has it.
   return (status?.harnesses ?? []).filter((item) => item.id !== "cursor").map((item) => HARNESS_NAMES[item.id] ?? item.id).join(", ") || "none";
@@ -117,11 +117,12 @@ export function useCloudroomConnection() {
   return useQuery({ queryKey: ["cloudroom-connection"], queryFn: async ({ signal }) => cloudroomStatusSchema.parse(await (await fetchWithAppSurface("/api/v1/cloudroom", { signal })).json()), refetchInterval: 10000 });
 }
 
-/** Agents besides Claude Code and Codex that are installed and signed in on this Mac, by provider ID. Checked once per app run. */
-export function useMacAgents() {
+export function useMacAgents(enabled = true) {
   return useQuery({
     queryKey: ["cloudroom-mac-agents"],
+    enabled,
     staleTime: Infinity,
+    gcTime: Infinity,
     queryFn: async ({ signal }) => z.object({ agents: z.array(z.string()) }).parse(await (await fetchWithAppSurface("/api/v1/cloudroom/mac/agents", { signal })).json()).agents,
   });
 }
@@ -290,7 +291,7 @@ export function useProjectSuggestions(): ProjectSelectorSuggestions | undefined 
 export function useImportSessions() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: ({ hostId, sessions }: { hostId: string; sessions: { harness: "claude-code" | "codex"; id: string }[] }) => sdk.cloudroom.importSessions(hostId, sessions),
+    mutationFn: ({ hostId, sessions }: { hostId: string; sessions: { harness: NativeSession["harness"]; id: string }[] }) => sdk.cloudroom.importSessions(hostId, sessions),
     onSettled: () => client.invalidateQueries(),
   });
 }

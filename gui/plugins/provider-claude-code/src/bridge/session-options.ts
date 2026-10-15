@@ -94,7 +94,12 @@ export function buildWorkspaceWriteDenialMessage(): string {
   return "Cloudroom's workspace sandbox allows work inside the current workspace only. Stay inside the workspace or explain why extra access is needed.";
 }
 
-function usesWorkspaceSandbox(params: BuildSessionOptionsArgs): boolean {
+type PermissionSessionOptionsArgs = Pick<
+  BuildSessionOptionsArgs,
+  "additionalWorkspaceWriteRoots" | "permissionMode" | "permissionScope"
+>;
+
+function usesWorkspaceSandbox(params: PermissionSessionOptionsArgs): boolean {
   return (
     params.permissionScope === "workspace" &&
     (params.permissionMode === "acceptEdits" ||
@@ -123,7 +128,7 @@ function claudeSandboxCanStart(): boolean {
 }
 
 function buildWorkspaceWriteSandbox(
-  params: BuildSessionOptionsArgs,
+  params: PermissionSessionOptionsArgs,
 ): Options["sandbox"] | undefined {
   if (!usesWorkspaceSandbox(params) || !claudeSandboxCanStart()) {
     return undefined;
@@ -138,6 +143,25 @@ function buildWorkspaceWriteSandbox(
     network: { allowLocalBinding: true },
     ...(allowWrite.length > 0
       ? { filesystem: { allowWrite: [...allowWrite] } }
+      : {}),
+  };
+}
+
+export function buildPermissionSessionOptions(
+  params: PermissionSessionOptionsArgs,
+): Pick<
+  SdkSessionOptions,
+  "additionalDirectories" | "permissionMode" | "sandbox"
+> {
+  const sandbox = buildWorkspaceWriteSandbox(params);
+  const additionalDirectories = usesWorkspaceSandbox(params)
+    ? (params.additionalWorkspaceWriteRoots ?? [])
+    : [];
+  return {
+    permissionMode: params.permissionMode,
+    ...(sandbox ? { sandbox } : {}),
+    ...(additionalDirectories.length > 0
+      ? { additionalDirectories: [...additionalDirectories] }
       : {}),
   };
 }
@@ -176,10 +200,6 @@ export function buildSessionOptions(
             : {}),
         };
   const model = params.model;
-  const sandbox = buildWorkspaceWriteSandbox(params);
-  const additionalDirectories = usesWorkspaceSandbox(params)
-    ? (params.additionalWorkspaceWriteRoots ?? [])
-    : [];
   const pathToClaudeCodeExecutable = resolveClaudeCodeExecutable({ env });
   const flagSettings = buildFlagSettings(params);
   const extraArgs = buildChromeExtraArgs(params.chromeEnabled);
@@ -189,7 +209,7 @@ export function buildSessionOptions(
     systemPrompt,
     model,
     env,
-    permissionMode: params.permissionMode,
+    ...buildPermissionSessionOptions(params),
     ...(params.reasoningLevel
       ? { effort: toSdkEffort(params.reasoningLevel) }
       : {}),
@@ -200,10 +220,6 @@ export function buildSessionOptions(
     ...(extraArgs ? { extraArgs } : {}),
     ...(pathToClaudeCodeExecutable ? { pathToClaudeCodeExecutable } : {}),
     ...(params.plugins ? { plugins: params.plugins } : {}),
-    ...(sandbox ? { sandbox } : {}),
-    ...(additionalDirectories.length > 0
-      ? { additionalDirectories: [...additionalDirectories] }
-      : {}),
     ...(params.disallowedTools && params.disallowedTools.length > 0
       ? { disallowedTools: [...params.disallowedTools] }
       : {}),

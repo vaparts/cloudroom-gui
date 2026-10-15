@@ -84,6 +84,7 @@ import {
   buildChromeExtraArgs,
   buildReadonlyDenialMessage,
   buildMutableFlagSettings,
+  buildPermissionSessionOptions,
   buildSessionOptions,
   buildWorkspaceWriteDenialMessage,
   toSdkEffort,
@@ -415,6 +416,51 @@ function applyChromeSetting(
   if (attachment.residentSession) {
     attachment.residentSession.restartBeforeNextTurn = {
       reason: CLAUDE_CHROME_SETTING_RESTART_REASON,
+      showRuntimeNote: false,
+    };
+  }
+}
+
+// Claude fixes the permission mode and sandbox when a session starts, so a
+// mode change mid-thread rebuilds the session before the next message.
+function applyPermissionSetting(
+  attachment: ThreadAttachment,
+  params: TurnStartParams | TurnSteerParams,
+): void {
+  const { permissionMode, permissionScope } = params;
+  const current = attachment.sessionConstructionConfig.sessionOptions;
+  if (
+    permissionMode === undefined ||
+    permissionScope === undefined ||
+    (permissionMode === attachment.approvedPlanPermissionMode &&
+      permissionScope === current.permissionScope)
+  ) {
+    return;
+  }
+  // Plan mode stays on; the new mode applies once the plan is approved.
+  const liveMode =
+    attachment.permissionMode === "plan" ? "plan" : permissionMode;
+  const sessionOptions = {
+    ...current,
+    additionalWorkspaceWriteRoots: params.additionalWorkspaceWriteRoots,
+    permissionMode: liveMode,
+    permissionScope,
+  };
+  attachment.sessionConstructionConfig = {
+    ...attachment.sessionConstructionConfig,
+    sessionOptions,
+  };
+  attachment.permissionMode = liveMode;
+  attachment.approvedPlanPermissionMode = permissionMode;
+  delete attachment.sessionOptions.sandbox;
+  delete attachment.sessionOptions.additionalDirectories;
+  Object.assign(
+    attachment.sessionOptions,
+    buildPermissionSessionOptions(sessionOptions),
+  );
+  if (attachment.residentSession) {
+    attachment.residentSession.restartBeforeNextTurn = {
+      reason: "Permission mode changed",
       showRuntimeNote: false,
     };
   }
@@ -2327,6 +2373,9 @@ async function runTurnInput(
       applyTurnEnvironment(attachment, params.config);
     }
     applyChromeSetting(attachment, params.chromeEnabled);
+    if (intent === "new-turn") {
+      applyPermissionSetting(attachment, params);
+    }
   }
 
   const threadSession = await getWritableThreadSession(params.threadId, intent);

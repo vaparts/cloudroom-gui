@@ -66,10 +66,7 @@ const SETTINGS_SEARCH_ENTRIES: readonly SettingsSearchEntry[] = [
   ...entries("general", "Skills", [["Cloudroom CLI skills", "install agents"]]),
   ...entries("general", "Thread naming", [
     ["Thread naming", "title rename name"],
-    ["Harness", "thread naming provider"],
-    ["Model", "thread naming llm"],
-    ["Fallback harness", "thread naming provider backup"],
-    ["Fallback model", "thread naming llm backup"],
+    ["Model", "thread naming llm harness provider fallback"],
     ["Rules", "thread naming title"],
     ["Rename vague titles", "thread naming"],
   ]),
@@ -144,7 +141,7 @@ const SETTINGS_SEARCH_ENTRIES: readonly SettingsSearchEntry[] = [
     ["Skills", "cloud skills"],
     ["MCP servers", "mcp tools model context protocol cloud"],
     ["GitHub repos", "clone repositories sandbox"],
-    ["Setup script", "install sandbox startup"],
+    ["Setup script", "install sandbox startup cli clis tools"],
   ]),
   ...entries("auto-delete", "Auto-delete", [
     ["Delete unused cloud threads", "retention delete old cloud threads sessions history days year never"],

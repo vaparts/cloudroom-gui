@@ -38,6 +38,10 @@ import {
   ThreadDeleteDialog,
   type ThreadDeleteDialogTarget,
 } from "@/components/dialogs/ThreadDeleteDialog";
+import {
+  ConfirmDeleteDialog,
+  ConfirmDeleteDialogContent,
+} from "@/components/dialogs/ConfirmDeleteDialog";
 import { ArchivedThreadToastDescription } from "@/components/thread/ArchivedThreadToastDescription";
 import { destroyPersistedBrowserViewsForThread } from "@/components/secondary-panel/browserViewVisibilityCoordinator";
 import { getThreadReadToggleAction } from "@cloudroom/client-core";
@@ -84,6 +88,11 @@ interface ThreadActionContext {
   childThreadCount: number;
 }
 
+interface ThreadArchiveConfirmTarget {
+  thread: Thread;
+  runningThreadCount: number;
+}
+
 const ARCHIVE_UNDO_TOAST_DURATION_MS = 8_000;
 
 export function ThreadActionsProvider({
@@ -117,9 +126,12 @@ export function ThreadActionsProvider({
 
   const renameDialog = useDialogState<ThreadRenameDialogTarget>();
   const deleteDialog = useDialogState<ThreadDeleteDialogTarget>();
+  const archiveConfirmDialog = useDialogState<ThreadArchiveConfirmTarget>();
 
   const { onClose: closeRenameDialog, onOpen: openRenameDialog } = renameDialog;
   const { onClose: closeDeleteDialog, onOpen: openDeleteDialog } = deleteDialog;
+  const { onClose: closeArchiveConfirm, onOpen: openArchiveConfirm } =
+    archiveConfirmDialog;
 
   useEffect(() => {
     return () => {
@@ -293,7 +305,7 @@ export function ThreadActionsProvider({
     [unarchiveMutate],
   );
 
-  const archiveThreadAndChildrenAction = useCallback(
+  const performArchive = useCallback(
     (thread: Thread) => {
       const sectionTargets = getSidebarThreadNavigationTargets(
         document
@@ -351,7 +363,7 @@ export function ThreadActionsProvider({
               label: "Undo",
               onClick: () => {
                 for (const threadId of response.archivedThreadIds) {
-                  unarchiveMutate({ id: threadId });
+                  unarchiveMutate({ id: threadId, keepParent: true });
                 }
               },
             },
@@ -376,6 +388,29 @@ export function ThreadActionsProvider({
       unarchiveMutate,
     ],
   );
+
+  const archiveThreadAndChildrenAction = useCallback(
+    (thread: Thread) => {
+      sdk.threads.childSummary({ threadId: thread.id }).then(
+        (summary) => {
+          const runningThreadCount = summary?.runningThreadCount ?? 0;
+          if (runningThreadCount > 0) {
+            openArchiveConfirm({ thread, runningThreadCount });
+            return;
+          }
+          performArchive(thread);
+        },
+        () => performArchive(thread),
+      );
+    },
+    [openArchiveConfirm, performArchive],
+  );
+
+  const confirmArchive = useCallback(() => {
+    const target = archiveConfirmDialog.target;
+    closeArchiveConfirm();
+    if (target) performArchive(target.thread);
+  }, [archiveConfirmDialog.target, closeArchiveConfirm, performArchive]);
 
   const toggleRead = useCallback(
     (thread: Thread) => {
@@ -449,6 +484,23 @@ export function ThreadActionsProvider({
         onOpenChange={deleteDialog.onOpenChange}
         onDelete={confirmDelete}
       />
+      <ConfirmDeleteDialog
+        open={archiveConfirmDialog.isOpen}
+        onOpenChange={archiveConfirmDialog.onOpenChange}
+      >
+        <ConfirmDeleteDialogContent
+          title="Archive a running thread?"
+          description={
+            archiveConfirmDialog.target?.runningThreadCount === 1
+              ? "It is still running. Archiving stops it."
+              : `${archiveConfirmDialog.target?.runningThreadCount ?? 0} threads in it are still running, including sub-agents. Archiving stops all of them.`
+          }
+          confirmLabel="Archive anyway"
+          pending={false}
+          onConfirm={confirmArchive}
+          onCancel={closeArchiveConfirm}
+        />
+      </ConfirmDeleteDialog>
     </ThreadActionsContext.Provider>
   );
 }

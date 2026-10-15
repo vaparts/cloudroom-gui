@@ -54,7 +54,8 @@ function ConnectionPanel({ provider }: { provider: "codex" | "cursor" }) {
     enabled: Boolean(account.data?.ready && open),
     queryFn: ({ signal }) => cursor ? sdk.cloudroom.cursorAuth(signal) : sdk.cloudroom.codexAuth(signal),
     retry: false,
-    refetchInterval: query => open && ["waiting", "missing"].includes(query.state.data?.state ?? "") ? 1500 : false,
+    // Fast only while a sign-in runs. Idle (missing) checks once a minute: each check costs database calls.
+    refetchInterval: query => !open ? false : query.state.data?.state === "waiting" ? 1500 : query.state.data?.state === "missing" ? 60_000 : false,
   });
   useEffect(() => {
     const show = (event: Event) => {

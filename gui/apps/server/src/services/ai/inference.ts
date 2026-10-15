@@ -58,7 +58,8 @@ const DEFAULT_INFERENCE_TIMEOUT_MS = 30_000;
 export const INFERENCE_POLICY = {
   hostRpcGraceMs: 1_000,
   commitMessage: { maxAttempts: 2, retryDelayMs: 0, timeoutMs: 5_000 },
-  threadMetadata: { maxAttempts: 2, retryDelayMs: 250, timeoutMs: 30_000 },
+  // Naming tries its model, the fallback, then its model again.
+  threadMetadata: { maxAttempts: 3, retryDelayMs: 250, timeoutMs: 30_000 },
   threadPurpose: { maxAttempts: 2, retryDelayMs: 250, timeoutMs: 90_000 },
   voiceTranscription: { maxAttempts: 2, retryDelayMs: 250, timeoutMs: 10_000 },
 } as const;
@@ -153,7 +154,8 @@ export async function inferenceCompleteWithFallback<T extends TSchema>(
     args.fallbackModel ?? deps.config.inferenceFallbackModel;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const model = attempt === 1 ? primaryModel : fallbackModel;
+    // Attempts alternate, so a third attempt retries the primary after the fallback fails.
+    const model = attempt % 2 === 1 ? primaryModel : fallbackModel;
     try {
       const value = args.complete
         ? await args.complete(model, args.prompt, args.timeoutMs)
@@ -288,7 +290,10 @@ async function completeWithAiService<T extends TSchema>(
       model: modelInfo.modelId,
       reasoningEffort: args.reasoningEffort ?? "none",
       prompt: args.prompt,
-      outputSchema: jsonObjectSchema.parse(args.schema),
+      // A JSON round trip drops TypeBox's hidden `~kind` keys, which Claude Code's strict schema check rejects.
+      outputSchema: jsonObjectSchema.parse(
+        JSON.parse(JSON.stringify(args.schema)),
+      ),
       timeoutMs,
     },
     { hostId, timeoutMs: timeoutMs + INFERENCE_POLICY.hostRpcGraceMs },

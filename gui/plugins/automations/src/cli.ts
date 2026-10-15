@@ -871,11 +871,16 @@ room-cli automation run <automationId> --project <id> [--idempotency-key <key>]
 room-cli automation runs <automationId> --project <id> [--limit <count>] [--output <runId>]
 room-cli automation delete <automationId> --project <id> --yes
 
-Cloud automations run on Cloudroom's servers, even while this Mac is off. Each run re-prompts one Cloud thread.
-room-cli automation create --cloud --thread <cloudThreadId> --name <name> --prompt <text> (--cron <expr> --timezone <tz> | --at <datetime> | --in <duration>)
+Cloud automations run on Cloudroom's servers, even while this Mac is off, at most every 15 minutes. A --cron run starts a
+fresh Cloud thread in its own sandbox from that thread's project and agent; --same-thread re-prompts the thread instead.
+A one-time --at/--in run re-prompts the thread; --new-thread gives it a fresh one.
+A fresh-thread automation saves the thread's settings, so it keeps running after that thread is archived.
+A --script/--script-file runs first (60 s), in the automation's own sandbox with fresh threads, else in the thread's:
+no output skips the run, output is added to the prompt.
+room-cli automation create --cloud --thread <cloudThreadId> --name <name> --prompt <text> (--cron <expr> --timezone <tz> | --at <datetime> | --in <duration>) [--new-thread | --same-thread] [--script <inline> | --script-file <path>]
 room-cli automation list --cloud [--thread <cloudThreadId>]
 room-cli automation show|pause|resume|run <cloudAutomationId>
-room-cli automation update <cloudAutomationId> [--name <name>] [--prompt <text>] [schedule flags]
+room-cli automation update <cloudAutomationId> [--name <name>] [--prompt <text>] [schedule flags] [--script <inline> | --script-file <path> | --no-script]
 room-cli automation delete <cloudAutomationId> --yes
 `;
 }
@@ -900,10 +905,22 @@ function cloudSchedule(args: ParsedArgs): { cron: string | null; timezone?: stri
 function printCloudAutomation(a: CloudAutomation): string {
   const schedule = a.cron ? `${a.cron} (${a.timezone})` : `once at ${a.run_at}`;
   const state = a.enabled ? `next run ${a.next_run_at ?? "within a minute"}` : "paused";
-  return `${a.id}  ${a.name}\n  Cloud thread ${a.thread_id} · ${schedule} · ${state} · ${a.runs} runs${a.last_error ? `\n  Last error: ${a.last_error}` : ""}\n`;
+  const mode = `${a.new_thread ? "new thread per run" : "re-prompts"}${a.script ? " · script" : ""}`;
+  return `${a.id}  ${a.name}\n  Cloud thread ${a.thread_id} · ${mode} · ${schedule} · ${state} · ${a.runs} runs${a.last_error ? `\n  Last error: ${a.last_error}` : ""}\n`;
 }
 
-async function runCloudCommand(cloud: Cloud, args: ParsedArgs, ctx: PluginCliContext): Promise<PluginCliResult> {
+/** The script a cloud automation runs first, from --script or a --script-file read on this Mac; null for --no-script. */
+async function cloudScript(bb: Pick<BbPluginApi, "sdk">, args: ParsedArgs, ctx: PluginCliContext): Promise<{ script?: string | null }> {
+  const inline = flag(args, "script");
+  if ([inline !== undefined, args.flags.has("script-file"), boolFlag(args, "no-script")].filter(Boolean).length > 1) throw new Error("Use one of --script, --script-file, or --no-script.");
+  if (boolFlag(args, "no-script")) return { script: null };
+  if (inline !== undefined) return { script: inline };
+  const file = await loadScriptFileSource(bb, args, ctx);
+  return file ? { script: file.content } : {};
+}
+
+async function runCloudCommand(bb: Pick<BbPluginApi, "sdk">, args: ParsedArgs, ctx: PluginCliContext): Promise<PluginCliResult> {
+  const cloud = bb.sdk.cloudroom;
   const id = args.positionals[0];
   const one = async (request: Parameters<Cloud["automations"]>[0], verb: string) => {
     const { automation } = await cloud.automations(request);
@@ -925,17 +942,18 @@ async function runCloudCommand(cloud: Cloud, args: ParsedArgs, ctx: PluginCliCon
     return { exitCode: 0, stdout: optionalJson(args, found) ?? printCloudAutomation(found) };
   }
   if (args.command === "create") {
-    if (["provider", "model", "script", "script-file", "environment"].some((name) => args.flags.has(name))) {
-      throw new Error("Cloud automations re-prompt a Cloud thread with its own harness and model. Drop --provider, --model, --script, and --environment.");
+    if (["provider", "model", "environment"].some((name) => args.flags.has(name))) {
+      throw new Error("Cloud automations use their Cloud thread's harness and model. Drop --provider, --model, and --environment.");
     }
     const thread = flag(args, "thread") ?? ctx.threadId;
     if (!thread) throw new Error("Missing required option --thread <cloudThreadId>.");
     const schedule = cloudSchedule(args);
     if (!schedule) throw new Error("Provide exactly one schedule flag: --cron, --at, or --in.");
-    return one({ action: "create", thread, name: requireFlag(args, "name"), prompt: requireFlag(args, "prompt"), ...schedule, enabled: !boolFlag(args, "disabled") }, "created");
+    return one({ action: "create", thread, name: requireFlag(args, "name"), prompt: requireFlag(args, "prompt"), ...schedule, enabled: !boolFlag(args, "disabled"),
+      ...(boolFlag(args, "new-thread") ? { new_thread: true } : boolFlag(args, "same-thread") ? { new_thread: false } : {}), ...await cloudScript(bb, args, ctx) }, "created");
   }
   if (args.command === "update") {
-    const fields = { ...(flag(args, "name") ? { name: flag(args, "name") } : {}), ...(flag(args, "prompt") ? { prompt: flag(args, "prompt") } : {}), ...cloudSchedule(args) };
+    const fields = { ...(flag(args, "name") ? { name: flag(args, "name") } : {}), ...(flag(args, "prompt") ? { prompt: flag(args, "prompt") } : {}), ...cloudSchedule(args), ...await cloudScript(bb, args, ctx) };
     return one({ action: "update", id: requireId(), ...fields }, "updated");
   }
   if (args.command === "pause" || args.command === "resume") return one({ action: "update", id: requireId(), enabled: args.command === "resume" }, args.command === "pause" ? "paused" : "resumed");
@@ -1016,7 +1034,7 @@ export function registerAutomationCli(args: {
         if (command === "help" || command === "--help" || command === "-h") {
           return { exitCode: 0, stdout: helpText() };
         }
-        if (isCloudCommand(parsed)) return await runCloudCommand(bb.sdk.cloudroom, parsed, ctx);
+        if (isCloudCommand(parsed)) return await runCloudCommand(bb, parsed, ctx);
         if (command === "list") {
           const result = service.list({
             projectId: requireFlag(parsed, "project"),

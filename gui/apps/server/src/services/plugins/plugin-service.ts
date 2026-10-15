@@ -107,6 +107,7 @@ import {
 } from "./install-sources.js";
 import { readPluginManifest, type PluginManifest } from "./manifest.js";
 import { listBundledPluginRegistrations } from "./builtin-registry.js";
+import { createPluginUsageTelemetry } from "./plugin-usage-telemetry.js";
 import {
   type BbPluginApi,
   type PluginAgentConfigurationContext,
@@ -548,6 +549,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
   const artifactRetentionMs =
     deps.artifactRetentionMs ?? DEFAULT_ARTIFACT_RETENTION_MS;
   const now = deps.now ?? Date.now;
+  const usage = createPluginUsageTelemetry({ telemetry: deps.telemetry, list });
   const marketplaceManifestCache = new Map<
     string,
     { manifestJson: string; manifest: MarketplaceManifest | null }
@@ -1414,9 +1416,11 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
       }
       await syncCliSkill();
       notifyPluginsChanged();
+      usage.start();
     },
 
     async stop() {
+      usage.stop();
       for (const watcher of builtinSourceWatchers.splice(0)) watcher.close();
       await disposeAll();
       await syncCliSkill();
@@ -1809,6 +1813,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
     },
 
     async invokeHttpRoute(id, route, context) {
+      usage.record(id, "ui");
       const outcome = await invokeWrapped(
         id,
         `http ${route.method} ${route.path}`,
@@ -1863,6 +1868,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
     },
 
     async invokeRpcHandler(id, method, handler, input) {
+      usage.record(id, "ui");
       const outcome = await invokeWrapped(id, `rpc ${method}`, async () => {
         const parsedInput = await validateRpcValue(
           handler.inputSchema,
@@ -1926,6 +1932,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
       if (!registration) {
         return fail(`plugin "${id}" registers no CLI command`);
       }
+      usage.record(id, "cli");
       const outcome = await invokeWrapped(
         id,
         `cli ${registration.name}`,
@@ -2155,6 +2162,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
           ],
         };
       }
+      usage.record(pluginId, "tool");
       const outcome = await invokeWrapped(
         pluginId,
         `tool ${record.name}`,
@@ -2273,6 +2281,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
         };
       }
       const provider = lookup.value;
+      usage.record(pluginId, "mention");
       const outcome = await invokeWrapped(
         pluginId,
         `mention resolve ${providerId}`,

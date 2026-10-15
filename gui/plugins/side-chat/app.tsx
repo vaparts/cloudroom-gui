@@ -277,7 +277,7 @@ function SideChatPanel({ params }: PluginThreadPanelProps) {
 export default definePluginApp((app) => {
   app.slots.messageAction({
     id: "reply-in-side-chat",
-    title: "Reply in side chat",
+    title: "Side chat",
     icon: "SideChat",
     experimental_requiresFork: true,
     async run(context: PluginMessageActionContext) {

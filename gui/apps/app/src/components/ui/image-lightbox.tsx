@@ -11,6 +11,7 @@ import { Button } from "@cloudroom/shared-ui/button";
 import { usePersistentOverlayFocus } from "@cloudroom/shared-ui/responsive-overlay";
 import { usePortalScopeProps } from "@cloudroom/shared-ui/lib/portal-scope";
 import { useBrowserDimmingOverlay } from "@/hooks/useBrowserDimmingModal";
+import { getBbDesktopInfo } from "@/lib/bb-desktop";
 import { Icon } from "@cloudroom/shared-ui/icon";
 
 type ImageLightboxKeyAction = "close" | "next" | "previous";
@@ -130,6 +131,12 @@ export function ImageLightbox({
   });
   const hasNavigation =
     hasMultipleImages && onPrevious !== undefined && onNext !== undefined;
+
+  // "Add to Chat" from the image context menu closes the preview so the user can keep typing.
+  useEffect(() => {
+    if (!isVisible) return;
+    return getBbDesktopInfo()?.onAddImageToChat?.(requestClose);
+  }, [isVisible, requestClose]);
 
   useEffect(() => {
     if (!isVisible) {

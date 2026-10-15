@@ -6,6 +6,7 @@ import {
   CLAUDE_CODE_ACTIVE_CATALOG_DATA,
   CLAUDE_XHIGH_CAPABLE_REASONING_EFFORT_DATA,
   DEFAULT_CLAUDE_CODE_MODEL,
+  claudeModelLabel,
 } from "./model-catalog-data.js";
 
 export function cloneReasoningEfforts(
@@ -32,7 +33,7 @@ export const CLAUDE_CODE_ACTIVE_CATALOG: readonly ClaudeCodeCatalogEntry[] =
   CLAUDE_CODE_ACTIVE_CATALOG_DATA.map((entry) => ({
     id: entry.model,
     model: entry.model,
-    displayName: entry.displayName,
+    displayName: claudeModelLabel(entry.model) ?? entry.model,
     description: entry.description,
     supportedReasoningEfforts: CLAUDE_XHIGH_CAPABLE_REASONING_EFFORTS,
     defaultReasoningEffort: entry.defaultReasoningEffort,

@@ -20,6 +20,7 @@ export type ThreadTimelineOpenPluginPanelHandler =
 
 interface ThreadTimelineForkMessageTarget {
   sourceSeqEnd: number;
+  context?: { text: string } & ThreadTimelineAddToChatSource;
 }
 
 export type ThreadTimelineForkMessageHandler = (

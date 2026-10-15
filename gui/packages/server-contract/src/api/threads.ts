@@ -606,10 +606,16 @@ export type ThreadQueuedMessageListResponse = z.infer<
 
 export const threadChildSummaryResponseSchema = z.object({
   nonDeletedChildCount: z.number().int().nonnegative(),
+  runningThreadCount: z.number().int().nonnegative(),
 });
 export type ThreadChildSummaryResponse = z.infer<
   typeof threadChildSummaryResponseSchema
 >;
+
+export const threadUnarchiveQuerySchema = z.object({
+  keepParent: z.enum(["true", "false"]).optional(),
+});
+export type ThreadUnarchiveQuery = z.infer<typeof threadUnarchiveQuerySchema>;
 
 export const deleteThreadRequestSchema = z.object({
   childThreadsConfirmed: z.boolean(),

@@ -14,17 +14,18 @@ import { assertUsableHostId } from "../hosts/primary-host.js";
 import { parseStoredEvent } from "../threads/thread-data.js";
 import { createClientTurnRequestId } from "../threads/thread-events.js";
 import { waitForStart } from "./bb-import.js";
+import { createMoreThread, isMoreHarness, moreSessions, moreTurns, type MoreHarness } from "./session-import-more.js";
 
-export type SessionHarness = "claude-code" | "codex";
+export type SessionHarness = "claude-code" | "codex" | MoreHarness;
 export interface NativeSession { harness: SessionHarness; id: string; title: string; cwd: string; updatedAt: number }
 export interface SessionImportResult {
   imported: { harness: SessionHarness; id: string; threadId: string; title: string }[];
   skipped: { harness: SessionHarness; id: string; title: string; reason: string }[];
 }
 
-interface Found extends NativeSession { path: string }
-interface Turn { at: number; text: string; model: string; replies: { at: number; text: string }[] }
-type Line = Record<string, any>;
+export interface Found extends NativeSession { path: string }
+export interface Turn { at: number; text: string; model: string; replies: { at: number; text: string }[] }
+export type Line = Record<string, any>;
 
 const claudeHome = () => process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
 const codexHome = () => process.env.CODEX_HOME || join(homedir(), ".codex");
@@ -55,7 +56,7 @@ async function run(deps: AppDeps, hostId: string, wanted: { harness: SessionHarn
     if (!session) { skip("Not found, or already in Cloudroom."); continue; }
     if (!existsSync(session.cwd)) { skip(`Its folder no longer exists: ${session.cwd}`); continue; }
     try {
-      const turns = harness === "claude-code" ? await claudeTurns(session.path) : await codexTurns(session.path);
+      const turns = harness === "claude-code" ? await claudeTurns(session.path) : harness === "codex" ? await codexTurns(session.path) : await moreTurns(session);
       if (!turns.length) { skip("No messages to bring over."); continue; }
       const thread = await createImportedThread(deps, hostId, session, turns);
       map[key] = thread.id;
@@ -77,7 +78,7 @@ async function findSessions(deps: AppDeps): Promise<Found[]> {
     const threadId = map[`${session.harness}:${session.id}`];
     return threadId !== undefined && getThread(deps.db, threadId)?.deletedAt === null;
   };
-  const sessions = [...await claudeSessions(), ...await codexSessions()];
+  const sessions = [...await claudeSessions(), ...await codexSessions(), ...await moreSessions(deps)];
   return sessions.filter((session) => !known.has(session.id) && !imported(session)).sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
@@ -172,6 +173,7 @@ async function createImportedThread(deps: AppDeps, hostId: string, session: Foun
     source: { type: "local_path", hostId, path: session.cwd },
   });
   await fillProjectGitRemote(deps, project, { hostId, path: session.cwd });
+  if (isMoreHarness(session.harness)) return createMoreThread(deps, { hostId, projectId: project.id, session, turns, history });
   const app = session.harness === "codex" ? "Codex" : "Claude Code";
   return createThreadFromRequest(deps, {
     projectId: project.id,
@@ -216,19 +218,19 @@ function historyRows(session: Found, turns: Turn[]): StoredEventRow[] {
   return rows;
 }
 
-async function* readLines(path: string): AsyncGenerator<Line> {
+export async function* readLines(path: string): AsyncGenerator<Line> {
   for await (const text of createInterface({ input: createReadStream(path), crlfDelay: Infinity })) {
     const line = parseLine(text);
     if (line) yield line;
   }
 }
 
-async function headLines(path: string, bytes: number): Promise<Line[]> {
+export async function headLines(path: string, bytes: number): Promise<Line[]> {
   const text = await readSlice(path, 0, bytes);
   return compact(text.split("\n").slice(0, text.length < bytes ? undefined : -1).map(parseLine));
 }
 
-async function tailLines(path: string, bytes: number): Promise<Line[]> {
+export async function tailLines(path: string, bytes: number): Promise<Line[]> {
   const size = (await stat(path)).size;
   const text = await readSlice(path, Math.max(0, size - bytes), bytes);
   return compact(text.split("\n").slice(size > bytes ? 1 : 0).map(parseLine));
@@ -245,16 +247,16 @@ async function readSlice(path: string, start: number, bytes: number): Promise<st
   }
 }
 
-function parseLine(text: string): Line | null {
+export function parseLine(text: string): Line | null {
   if (!text.trim()) return null;
   try { return JSON.parse(text) as Line; } catch { return null; }
 }
 
-function shorten(text: string): string {
+export function shorten(text: string): string {
   const line = text.split("\n").map((part) => part.trim()).find(Boolean)?.replace(/( \(fork\))+$/, "") ?? "Imported chat";
   return line.length > 80 ? `${line.slice(0, 77)}…` : line;
 }
-async function mapLimit<T, R>(items: T[], task: (item: T) => Promise<R>, limit = 16): Promise<R[]> {
+export async function mapLimit<T, R>(items: T[], task: (item: T) => Promise<R>, limit = 16): Promise<R[]> {
   const results: R[] = new Array(items.length);
   let next = 0;
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
@@ -263,6 +265,6 @@ async function mapLimit<T, R>(items: T[], task: (item: T) => Promise<R>, limit =
   return results;
 }
 
-function compact<T>(items: (T | null | undefined)[]): T[] {
+export function compact<T>(items: (T | null | undefined)[]): T[] {
   return items.filter((item): item is T => item != null);
 }

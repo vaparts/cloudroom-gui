@@ -202,12 +202,6 @@ async function reuseTargetThreadForRun(
     runId: args.run.id,
     threadId: args.targetThreadId,
   });
-  markAutomationThread(db, {
-    automationId: args.automation.id,
-    runId: args.run.id,
-    threadId: args.targetThreadId,
-    now: Date.now(),
-  });
   await bb.sdk.threads.send({
     threadId: args.targetThreadId,
     mode: "steer-if-active",

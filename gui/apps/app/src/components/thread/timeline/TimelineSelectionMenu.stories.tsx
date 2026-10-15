@@ -13,10 +13,23 @@ export default {
 const AGENT_TEXT =
   "The migration runs in three phases. First we backfill the new column with a default value at the server boundary, then flip reads over once every row is populated. Only after that do we drop the legacy field, so a rollback at any point keeps the table readable.";
 
-type Handlers = Pick<TimelineSelectionMenuProps, "onAddToChat" | "onDismiss">;
+type Handlers = Pick<
+  TimelineSelectionMenuProps,
+  "onAddToChat" | "onFork" | "pluginActions" | "onDismiss"
+>;
+
+const sideChatAction = (onSelect: () => void) => ({
+  key: "side-chat:reply-in-side-chat",
+  pluginId: null,
+  icon: "SideChat",
+  label: "Side chat",
+  onSelect,
+});
 
 const logHandlers: Handlers = {
   onAddToChat: (text) => console.log("onAddToChat", text),
+  onFork: () => console.log("onFork"),
+  pluginActions: [sideChatAction(() => console.log("onSideChat"))],
   onDismiss: () => console.log("onDismiss"),
 };
 
@@ -130,6 +143,8 @@ export function Interactive() {
             selected="flip reads over once every row is populated"
             handlers={{
               onAddToChat: (text) => push(`Include context: "${text}"`),
+              onFork: () => push("Fork"),
+              pluginActions: [sideChatAction(() => push("Side chat"))],
               onDismiss: () => push("Dismissed"),
             }}
           />

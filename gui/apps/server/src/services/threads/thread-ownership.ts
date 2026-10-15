@@ -189,6 +189,7 @@ function releaseChildInTransaction(
 export function unarchiveThreadAsTopLevel(
   deps: Pick<LoggedPendingInteractionWorkSessionDeps, "db" | "hub">,
   threadId: string,
+  keepParent = false,
 ): Thread | null {
   const notificationBuffer = new NotificationBuffer();
   const result = deps.db.transaction(
@@ -198,6 +199,9 @@ export function unarchiveThreadAsTopLevel(
         return thread;
       }
       const parent = getThread(tx, thread.parentThreadId);
+      if (keepParent && parent && parent.deletedAt === null) {
+        return thread;
+      }
       return releaseChildInTransaction(
         { db: tx, hub: notificationBuffer },
         thread,

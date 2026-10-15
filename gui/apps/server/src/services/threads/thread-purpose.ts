@@ -25,8 +25,9 @@ import { getLastThreadOutput } from "./thread-data.js";
 const MAX_MESSAGE_LENGTH = 600;
 const MAX_REPLY_LENGTH = 2_000;
 const RECENT_MESSAGES = 4;
-const MAX_PURPOSE_LENGTH = 240;
+const MAX_PURPOSE_LENGTH = 110;
 const LOGIN_CHECK_MS = 5 * 60_000;
+const PERCENT_STAGES = [10, 25, 50, 75, 90, 100];
 
 const purposeSchema = Type.Object({
   purpose: Type.String(),
@@ -255,7 +256,14 @@ async function writePurpose(
     timeoutMs: INFERENCE_POLICY.threadPurpose.timeoutMs,
   });
   const text = result
-    ? clip(result.purpose.replace(/^["'`]+|["'`]+$/gu, ""), MAX_PURPOSE_LENGTH)
+    ? clip(
+        result.purpose
+          .replace(/^["'`]+|["'`]+$/gu, "")
+          .replace(/\btriag(?:e|ed|ing)\b/giu, (word) =>
+            word[0] === "T" ? "Looking into" : "looking into",
+          ),
+        MAX_PURPOSE_LENGTH,
+      )
     : "";
   if (
     !result ||
@@ -269,7 +277,11 @@ async function writePurpose(
   if (latest.purpose && latest.purpose.sourceSeq > sourceSeq) return;
   setThreadPurpose(deps.db, deps.hub, threadId, {
     text,
-    percent: Math.max(0, Math.min(100, Math.round(result.percent))),
+    percent: PERCENT_STAGES.reduce((best, stage) =>
+      Math.abs(stage - result.percent) < Math.abs(best - result.percent)
+        ? stage
+        : best,
+    ),
     sourceSeq,
     updatedAt: Date.now(),
   });

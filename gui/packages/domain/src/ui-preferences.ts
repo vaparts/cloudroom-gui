@@ -71,7 +71,6 @@ export const UI_PREFERENCE_KEYS = [
   "sidebar.navigationProvider",
   "sidebar.threadListProvider",
   "threadNaming.model",
-  "threadNaming.fallbackModel",
   "threadNaming.rules",
   "threadNaming.renameSensitivity",
   "threadPurpose.enabled",
@@ -210,12 +209,7 @@ export const uiPreferenceDefinitions = {
   "threadNaming.model": defineUiPreference(
     uiPreferenceStringSchema.nullable(),
     null,
-    "Model that names new threads after the first message, as provider/model; null uses the app's inference model.",
-  ),
-  "threadNaming.fallbackModel": defineUiPreference(
-    uiPreferenceStringSchema.nullable(),
-    null,
-    "Model that names new threads when the naming model fails, as provider/model; null retries the naming model on timeouts.",
+    "Model that names new threads after the first message, as provider/model; null is Automatic (the app's inference model). Naming falls back to the other harness.",
   ),
   "threadNaming.rules": defineUiPreference(
     z.string().trim().min(1).max(THREAD_NAMING_RULES_MAX_LENGTH),
@@ -225,7 +219,7 @@ export const uiPreferenceDefinitions = {
   "threadNaming.renameSensitivity": defineUiPreference(
     z.number().int().min(1).max(5),
     3,
-    "How readily a vague generated title is renamed once after the first reply: 1 is off, 3 renames about 20% of threads, 5 about 45%.",
+    "Whether a vague generated title is renamed once after the first reply: 1 is off; Settings saves 3 (about 20% of threads) when on. Up to 5 renames about 45%.",
   ),
   "threadPurpose.enabled": defineUiPreference(
     z.boolean(),

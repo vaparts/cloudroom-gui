@@ -1,6 +1,17 @@
 import { useEffect, useState } from "react";
 import { useAtom } from "jotai";
-import { Slider } from "@cloudroom/shared-ui/slider";
+import { Button } from "@cloudroom/shared-ui/button";
+import { COARSE_POINTER_ICON_SIZE_CLASS } from "@cloudroom/shared-ui/coarse-pointer-sizing";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@cloudroom/shared-ui/dropdown-menu";
+import { Icon } from "@cloudroom/shared-ui/icon";
+import { cn } from "@cloudroom/shared-ui/lib/utils";
 import { Switch } from "@cloudroom/shared-ui/switch";
 import { Textarea } from "@cloudroom/shared-ui/textarea";
 import {
@@ -11,17 +22,21 @@ import {
   SettingsSection,
   SettingsWithControl,
 } from "@/components/ui/settings-section";
-import { useSystemConfig } from "@/hooks/queries/system-queries";
+import {
+  useSystemConfig,
+  useSystemExecutionOptions,
+} from "@/hooks/queries/system-queries";
 import { createSyncedPreferenceAtom } from "@/lib/ui-preferences/synced-preference-atom";
+import {
+  SETTINGS_DROPDOWN_CONTENT_CLASS,
+  SETTINGS_DROPDOWN_TRIGGER_CLASS,
+} from "./settings-dropdown";
 import {
   SettingsDropdown,
   ThreadNamingModelPicker,
 } from "./ThreadNamingModelPicker";
 
 const threadNamingModelAtom = createSyncedPreferenceAtom("threadNaming.model");
-const threadNamingFallbackModelAtom = createSyncedPreferenceAtom(
-  "threadNaming.fallbackModel",
-);
 const threadNamingRulesAtom = createSyncedPreferenceAtom("threadNaming.rules");
 const renameSensitivityAtom = createSyncedPreferenceAtom(
   "threadNaming.renameSensitivity",
@@ -39,25 +54,17 @@ const PURPOSE_EFFORT_OPTIONS = [
   { value: "medium", label: "Medium" },
   { value: "high", label: "High" },
 ] as const;
-const RENAME_SENSITIVITY_LABELS = [
-  "Off",
-  "Rarely",
-  "Sometimes",
-  "Often",
-  "Very often",
-] as const;
+// The switch saves the default sensitivity; 1 means off.
+const RENAME_SENSITIVITY_ON = 3;
+const RENAME_SENSITIVITY_OFF = 1;
 
 export function ThreadNamingSettingsSection() {
   const [model, setModel] = useAtom(threadNamingModelAtom);
-  const [fallbackModel, setFallbackModel] = useAtom(
-    threadNamingFallbackModelAtom,
-  );
   const [rules, setRules] = useAtom(threadNamingRulesAtom);
   const [renameSensitivity, setRenameSensitivity] = useAtom(
     renameSensitivityAtom,
   );
   const [draftRules, setDraftRules] = useState(rules);
-  const defaultModel = useSystemConfig().data?.aiServices.inference ?? null;
 
   useEffect(() => setDraftRules(rules), [rules]);
 
@@ -73,23 +80,15 @@ export function ThreadNamingSettingsSection() {
       description="Names new threads after your first message."
     >
       <div className="space-y-4">
-        <ThreadNamingModelPicker
-          harnessDescription="Uses this harness's subscription."
-          value={model}
-          defaultValue={defaultModel}
-          onChange={setModel}
-        />
-        <ThreadNamingModelPicker
-          prefix="Fallback"
-          harnessDescription="Used when the main model fails."
-          value={fallbackModel}
-          defaultValue={null}
-          allowNone
-          onChange={setFallbackModel}
-        />
+        <SettingsWithControl
+          label="Model"
+          description="Falls back to your other harness if it fails."
+        >
+          <NamingModelDropdown value={model} onChange={setModel} />
+        </SettingsWithControl>
         <SettingsWithControl
           label="Rules"
-          description="How titles should look. Saved when you click away."
+          description="How titles should look. It also sees your other thread names, so new names stand out. Saved when you click away."
           controlPlacement="below"
         >
           <Textarea
@@ -105,24 +104,144 @@ export function ThreadNamingSettingsSection() {
           label="Rename vague titles"
           description="After the first reply, gives a vague title a clearer name once. Titles you set are never changed."
         >
-          <div className="flex w-48 items-center gap-3">
-            <Slider
-              aria-label="Rename vague titles"
-              min={1}
-              max={5}
-              step={1}
-              value={[renameSensitivity]}
-              onValueChange={([value]) => {
-                if (value !== undefined) setRenameSensitivity(value);
-              }}
-            />
-            <span className="w-16 shrink-0 text-xs text-muted-foreground">
-              {RENAME_SENSITIVITY_LABELS[renameSensitivity - 1]}
-            </span>
-          </div>
+          <Switch
+            aria-label="Rename vague titles"
+            checked={renameSensitivity > RENAME_SENSITIVITY_OFF}
+            onCheckedChange={(on) =>
+              setRenameSensitivity(
+                on ? RENAME_SENSITIVITY_ON : RENAME_SENSITIVITY_OFF,
+              )
+            }
+          />
         </SettingsWithControl>
       </div>
     </SettingsSection>
+  );
+}
+
+interface NamingModelDropdownProps {
+  /** Saved `harness/model` value; null is Automatic. */
+  value: string | null;
+  onChange: (value: string | null) => void;
+}
+
+/** One dropdown: Automatic, then each naming harness's models. */
+function NamingModelDropdown(props: NamingModelDropdownProps) {
+  const config = useSystemConfig().data?.aiServices;
+  const current = props.value ?? config?.inference ?? null;
+  const [harness, modelId] = current?.split("/") ?? [];
+  const currentModels =
+    useSystemExecutionOptions({
+      enabled: harness !== undefined,
+      ...(harness ? { providerId: harness } : {}),
+    }).data?.models ?? [];
+  const currentLabel =
+    currentModels.find((model) => model.id === modelId)?.displayName ??
+    modelId ??
+    "None";
+  const services = (config?.services ?? []).filter((service) =>
+    service.kinds.includes("inference"),
+  );
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="outline"
+          size="sm"
+          className={cn(SETTINGS_DROPDOWN_TRIGGER_CLASS, "sm:w-56")}
+          aria-label="Thread naming model"
+        >
+          <span className="min-w-0 truncate">
+            {props.value === null
+              ? `Automatic (${currentLabel})`
+              : currentLabel}
+          </span>
+          <Icon name="ChevronDown" className="size-3.5 text-muted-foreground" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="end"
+        className={cn(
+          SETTINGS_DROPDOWN_CONTENT_CLASS,
+          "max-h-[var(--radix-dropdown-menu-content-available-height)] overflow-y-auto",
+        )}
+        mobileTitle="Thread naming model"
+      >
+        <ModelItem
+          label="Automatic (recommended)"
+          selected={props.value === null}
+          onSelect={() => props.onChange(null)}
+        />
+        {services.map((service) => (
+          <HarnessModels
+            key={service.id}
+            harness={service.id}
+            fallbackLabel={service.displayName}
+            value={props.value}
+            onChange={props.onChange}
+          />
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+interface HarnessModelsProps {
+  harness: string;
+  fallbackLabel: string;
+  value: string | null;
+  onChange: (value: string) => void;
+}
+
+function HarnessModels(props: HarnessModelsProps) {
+  const options = useSystemExecutionOptions({
+    providerId: props.harness,
+  }).data;
+  const models = options?.models ?? [];
+  if (models.length === 0) return null;
+  const label =
+    options?.providers.find((provider) => provider.id === props.harness)
+      ?.displayName ?? props.fallbackLabel;
+
+  return (
+    <>
+      <DropdownMenuSeparator />
+      <DropdownMenuLabel>{label}</DropdownMenuLabel>
+      {models.map((model) => {
+        const value = `${props.harness}/${model.id}`;
+        return (
+          <ModelItem
+            key={value}
+            label={model.displayName}
+            selected={props.value === value}
+            onSelect={() => props.onChange(value)}
+          />
+        );
+      })}
+    </>
+  );
+}
+
+interface ModelItemProps {
+  label: string;
+  selected: boolean;
+  onSelect: () => void;
+}
+
+function ModelItem(props: ModelItemProps) {
+  return (
+    <DropdownMenuItem onSelect={props.onSelect}>
+      <span className="min-w-0 truncate">{props.label}</span>
+      <Icon
+        name="Check"
+        className={cn(
+          "ml-auto",
+          !props.selected && "opacity-0",
+          COARSE_POINTER_ICON_SIZE_CLASS,
+        )}
+      />
+    </DropdownMenuItem>
   );
 }
 

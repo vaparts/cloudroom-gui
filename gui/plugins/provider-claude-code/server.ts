@@ -8,6 +8,7 @@ import {
   CLAUDE_CODE_ACTIVE_CATALOG_DATA,
   CLAUDE_XHIGH_CAPABLE_REASONING_EFFORT_DATA,
   DEFAULT_CLAUDE_CODE_MODEL,
+  claudeModelLabel,
 } from "./src/model-catalog-data.js";
 import { CLAUDE_NATIVE_ROOTS_DECLARATION } from "./src/native-roots.js";
 
@@ -115,7 +116,7 @@ export default function plugin(bb: BbPluginApi) {
       scope: "host",
       fallback: CLAUDE_CODE_ACTIVE_CATALOG_DATA.map((entry) => ({
         id: entry.model,
-        displayName: entry.displayName,
+        displayName: claudeModelLabel(entry.model) ?? entry.model,
         description: entry.description,
         supportedReasoningEfforts: CLAUDE_XHIGH_CAPABLE_REASONING_EFFORT_DATA,
         defaultReasoningEffort: entry.defaultReasoningEffort,

@@ -93,6 +93,7 @@ import type {
   RestartTerminalRequest,
   DeleteThreadSectionRequest,
   DeleteThreadRequest,
+  ThreadUnarchiveQuery,
   EnvironmentActionApiError,
   EnvironmentActionRequest,
   EnvironmentActionResponse,
@@ -294,6 +295,7 @@ import {
   updateThreadPluginMetadataRequestSchema,
   threadPluginMetadataQuerySchema,
   deleteThreadRequestSchema,
+  threadUnarchiveQuerySchema,
   environmentActionRequestSchema,
   environmentDiffBranchesQuerySchema,
   environmentDiffFileQuerySchema,
@@ -1452,7 +1454,9 @@ export const publicApiRoutes = {
     unarchive: defineRoute({
       path: "/threads/:id/unarchive",
       method: "post",
-      request: noRequest<PathId>(),
+      request: optionalQueryRequest<PathId, ThreadUnarchiveQuery>(
+        threadUnarchiveQuerySchema,
+      ),
       response: jsonResponse<{ ok: true }>(),
     }),
     read: defineRoute({

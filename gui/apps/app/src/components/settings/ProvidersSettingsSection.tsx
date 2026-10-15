@@ -40,11 +40,13 @@ import {
 } from "@/components/provider-cli/provider-cli-install-store";
 import {
   openCodexConnection,
-  openCursorConnection,
   useCloudLogin,
 } from "@/components/CodexConnectionPanel";
 import { RowStateControl, RowVersions } from "./UpdatesSettingsSection";
-import { useCloudroomAccount } from "@/hooks/queries/cloudroom-queries";
+import {
+  cloudCanRunHarness,
+  useCloudroomAccount,
+} from "@/hooks/queries/cloudroom-queries";
 import {
   useHostProviderCliStatus,
   useInstallableProviders,
@@ -76,11 +78,6 @@ const CELL = {
 } as const;
 
 const TABLE_BUTTON = "h-7 px-2.5 text-xs";
-
-const CLOUD_LOGINS: Record<string, "codex" | "cursor"> = {
-  codex: "codex",
-  "acp-cursor": "cursor",
-};
 
 function applyProviderOrder(
   providers: readonly ProviderInfo[],
@@ -211,6 +208,9 @@ function Cells({
 }
 
 const DASH = <span className="text-muted-foreground/50">–</span>;
+const MAC_ONLY = (
+  <span className="text-xs text-muted-foreground">Mac only</span>
+);
 
 function Check({ label }: { label: string }) {
   return (
@@ -304,25 +304,25 @@ function ClaudeCloudLogin() {
   );
 }
 
-function CodexCloudLogin({ kind }: { kind: "codex" | "cursor" }) {
-  const auth = useCloudLogin(kind);
-  const name = kind === "cursor" ? "Cursor" : "Codex";
-  const open = () =>
-    kind === "cursor" ? openCursorConnection() : openCodexConnection();
+function CodexCloudLogin() {
+  const auth = useCloudLogin("codex");
   if (auth.isPending) return null;
   if (auth.data?.state === "connected")
     return (
       <button
         type="button"
-        aria-label={`Manage ${name} Cloud login`}
+        aria-label="Manage Codex Cloud login"
         className="flex items-center rounded-sm text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-        onClick={open}
+        onClick={() => openCodexConnection()}
       >
         <Icon name="Check" aria-hidden className="size-4" />
       </button>
     );
   return (
-    <TableButton label={`Connect ${name} in the Cloud`} onClick={open}>
+    <TableButton
+      label="Connect Codex in the Cloud"
+      onClick={() => openCodexConnection()}
+    >
       Connect
     </TableButton>
   );
@@ -330,8 +330,16 @@ function CodexCloudLogin({ kind }: { kind: "codex" | "cursor" }) {
 
 function CloudLogin({ provider }: { provider: ProviderInfo }) {
   if (provider.id === "claude-code") return <ClaudeCloudLogin />;
-  const kind = CLOUD_LOGINS[provider.id];
-  return kind === undefined ? DASH : <CodexCloudLogin kind={kind} />;
+  if (provider.id === "codex") return <CodexCloudLogin />;
+  // Pi, opencode, Hermes, fx, and Devin have no Cloud sign-in: the Cloud reuses this Mac's login (ADR 0130).
+  // Cursor (ADR 0161) and the rest can't run in Cloud.
+  return cloudCanRunHarness(provider.id) ? (
+    <Check
+      label={`${provider.displayName} runs in the Cloud with this Mac's login`}
+    />
+  ) : (
+    MAC_ONLY
+  );
 }
 
 function AutoUpdateSwitch({

@@ -48,20 +48,7 @@ Cold latest requests still cost about 3 ms and 13 ms more on two threads.
 Shared-machine timings are not a latency SLA, and these four threads are not
 proof of performance across the entire 1,132-thread corpus.
 
-Run the committed fixed endpoint/client corpus check from the repository root:
-
-```sh
-BB_PROVIDER_CORPUS_DIR=/path/to/copied-corpus \
-BB_TIMELINE_PAGINATION_REPORT=/tmp/timeline-pagination.json \
-pnpm exec turbo run test --env-mode=loose --force --filter=@cloudroom/server -- \
-  test/provider-corpus/timeline-pagination-correctness.test.ts
-```
-
-`BB_TIMELINE_PAGINATION_THREAD` optionally selects one of the four fixture IDs.
-The report contains timing/count metadata; optional `/tmp/timeline-diff-*.json`
-diagnostics contain copied conversation content and should remain local.
-The paired run uses the same test with restored main source modules and a spy
-that switches the route builder; it alternates the corresponding client merge.
+The corpus check that produced these numbers was removed on 2026-10-14.
 
 Focused checks cover tiny event/512-byte targets, oversized turns/details,
 nested and late events, straddling items, snapshot appends, edited history,

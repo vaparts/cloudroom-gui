@@ -365,18 +365,24 @@ export function registerThreadBaseRoutes(app: Hono, deps: AppDeps): void {
     );
   });
 
-  function getThreadChildSummary(threadId: string): ThreadChildSummaryResponse {
+  function getThreadChildSummary(thread: Thread): ThreadChildSummaryResponse {
     const nonDeletedChildCount = countNonDeletedAssignedChildThreads(deps.db, {
-      parentThreadId: threadId,
+      parentThreadId: thread.id,
     });
+    const runningThreadCount = listThreadWithDescendants(deps, thread).filter(
+      (target) =>
+        target.archivedAt === null &&
+        (target.status === "starting" || target.status === "active"),
+    ).length;
     return {
       nonDeletedChildCount,
+      runningThreadCount,
     };
   }
 
   get(routes.childSummary, (context) => {
     const thread = requirePublicThread(deps.db, context.req.param("id"));
-    return context.json(getThreadChildSummary(thread.id));
+    return context.json(getThreadChildSummary(thread));
   });
 
   patch(routes.update, async (context, payload) => {

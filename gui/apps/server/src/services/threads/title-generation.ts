@@ -1,6 +1,7 @@
 import { renderTemplate } from "@cloudroom/templates";
-import { getThread, updateThread } from "@cloudroom/db";
+import { getThread, threads, updateThread } from "@cloudroom/db";
 import type { PromptInput } from "@cloudroom/domain";
+import { and, desc, eq, isNotNull, isNull, ne } from "drizzle-orm";
 import type { AppDeps, LoggedWorkSessionDeps } from "../../types.js";
 import { Type } from "@earendil-works/pi-ai";
 import {
@@ -12,6 +13,8 @@ import { readUiPreferences } from "../system/ui-preferences.js";
 
 const MAX_GENERATED_TITLE_LENGTH = 80;
 const MAX_BRANCH_SLUG_LENGTH = 40;
+const OTHER_TITLES_LIMIT = 20;
+const CLAUDE_NAMING_MODEL = "claude-code/claude-haiku-5-5";
 
 interface ApplyGeneratedThreadTitleArgs {
   threadId: string;
@@ -112,6 +115,43 @@ function normalizeGeneratedThreadMetadata(
   return { title };
 }
 
+/** A configured BB_INFERENCE_FALLBACK wins. Otherwise naming falls back to the other harness, so one signed-out
+ *  harness never blocks it; the primary still gets a final retry. */
+function namingFallbackModel(config: AppDeps["config"], model: string): string {
+  if (config.inferenceFallbackModel !== config.inferenceModel) {
+    return config.inferenceFallbackModel;
+  }
+  return model.startsWith("claude-code/")
+    ? config.inferenceModel
+    : CLAUDE_NAMING_MODEL;
+}
+
+/** Titles of the project's latest open threads, so a new title can stand out from them. */
+function otherThreadTitles(
+  deps: Pick<AppDeps, "db">,
+  threadId: string,
+): string[] {
+  const projectId = getThread(deps.db, threadId)?.projectId;
+  if (!projectId) return [];
+  return deps.db
+    .select({ title: threads.title })
+    .from(threads)
+    .where(
+      and(
+        eq(threads.projectId, projectId),
+        ne(threads.id, threadId),
+        eq(threads.visibility, "visible"),
+        isNull(threads.archivedAt),
+        isNull(threads.deletedAt),
+        isNotNull(threads.title),
+      ),
+    )
+    .orderBy(desc(threads.updatedAt))
+    .limit(OTHER_TITLES_LIMIT)
+    .all()
+    .map((row) => row.title?.slice(0, MAX_GENERATED_TITLE_LENGTH) ?? "");
+}
+
 export async function generateThreadMetadataWithOutcome(
   deps: LoggedWorkSessionDeps,
   args: ThreadMetadataGenerationArgs,
@@ -132,12 +172,14 @@ export async function generateThreadMetadataWithOutcome(
   }
 
   const preferences = readUiPreferences(deps);
-  const model = preferences["threadNaming.model"].value;
-  const fallbackModel =
-    preferences["threadNaming.fallbackModel"].value ?? model;
+  const model =
+    preferences["threadNaming.model"].value ?? deps.config.inferenceModel;
   const prompt = renderTemplate("generateThreadMetadata", {
     agentReply: args.agentReply ?? "",
     cleanedPrompt: fallback,
+    otherTitles: otherThreadTitles(deps, args.threadId)
+      .map((title) => `- ${title}`)
+      .join("\n"),
     rules: preferences["threadNaming.rules"].value,
   });
   const maxAttempts = Math.max(1, args.timeoutMaxAttempts ?? 1);
@@ -148,8 +190,8 @@ export async function generateThreadMetadataWithOutcome(
       label: "Thread metadata inference",
       logContext: { threadId: args.threadId },
       maxAttempts,
-      ...(model ? { primaryModel: model } : {}),
-      ...(fallbackModel ? { fallbackModel } : {}),
+      primaryModel: model,
+      fallbackModel: namingFallbackModel(deps.config, model),
       prompt,
       retryDelayMs: INFERENCE_POLICY.threadMetadata.retryDelayMs,
       schema: threadMetadataSchema,

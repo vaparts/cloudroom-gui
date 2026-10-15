@@ -10,6 +10,7 @@ import {
 import type {
   ProjectExecutionDefaults,
   Project,
+  PromptInput,
   Thread,
   ThreadOriginKind,
   ThreadVisibility,
@@ -24,7 +25,9 @@ import { buildExecutionOptions } from "./thread-commands.js";
 import {
   copyForkSourceHistory,
   recordImportFork,
+  recordTextImport,
   resolveThreadForkPoint,
+  type ThreadForkHistory,
   type ThreadForkPoint,
 } from "./thread-fork-history.js";
 import {
@@ -75,6 +78,11 @@ import {
 
 type ThreadCreateDeps = LoggedPendingInteractionWorkSessionDeps;
 
+interface ImportedText {
+  history: ThreadForkHistory;
+  seed: PromptInput[];
+}
+
 interface CreateProvisioningThreadArgs {
   deferFork: boolean;
   environmentId: string | null;
@@ -82,6 +90,7 @@ interface CreateProvisioningThreadArgs {
     typeof buildExecutionOptions
   >[2]["projectDefaults"];
   fork: ThreadForkPoint | null;
+  importedText?: ImportedText;
   request: ThreadCreateServiceRequest;
   providerInput?: ThreadCreateServiceRequestInput["input"];
 }
@@ -386,16 +395,11 @@ async function createPendingThreadAndAttemptFirstDispatch(
   });
   let execution: Awaited<ReturnType<typeof buildExecutionOptions>>;
   try {
-    if (
-      args.fork !== null &&
-      args.fork.history !== null &&
-      args.request.visibility === "visible"
-    ) {
-      copyForkSourceHistory(deps, {
-        fork: thread,
-        history: args.fork.history,
-      });
+    const history = args.fork?.history ?? args.importedText?.history ?? null;
+    if (history !== null && args.request.visibility === "visible") {
+      copyForkSourceHistory(deps, { fork: thread, history });
     }
+    if (args.importedText) recordTextImport(deps, thread, args.importedText.seed);
     if (args.deferFork && args.fork !== null) {
       recordImportFork(
         deps,
@@ -517,6 +521,7 @@ export async function createThreadFromRequest(
     providerInput?: ThreadCreateServiceRequestInput["input"];
     forkSourceEnvironmentId?: string;
     importedFork?: ThreadForkPoint;
+    importedText?: ImportedText;
   } = {},
 ) {
   const project = requirePublicProjectForThreadCreate(
@@ -759,7 +764,7 @@ export async function createThreadFromRequest(
     resolvedExecutionDefaults !== null &&
     resolvedExecutionDefaults.providerId !== request.providerId
   ) {
-    if (options.importedFork) {
+    if (options.importedFork || options.importedText) {
       throw new ApiError(
         409,
         "import_provider_unavailable",
@@ -799,11 +804,16 @@ export async function createThreadFromRequest(
   }
 
   const createArgs = {
-    deferFork: options.importedFork !== undefined,
+    deferFork:
+      options.importedFork !== undefined ||
+      options.importedText !== undefined,
     environmentId,
     environmentIntent,
     executionDefaults: resolvedExecutionDefaults,
     fork,
+    ...(options.importedText !== undefined
+      ? { importedText: options.importedText }
+      : {}),
     ...(options.providerInput !== undefined
       ? { providerInput: options.providerInput }
       : {}),

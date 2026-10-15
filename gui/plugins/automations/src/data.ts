@@ -949,11 +949,12 @@ export function isAutomationSpawnedThread(db: Db, threadId: string): boolean {
   return (
     db
       .prepare(
-        `SELECT thread_id FROM automation_thread_marks WHERE thread_id = ? LIMIT 1`,
+        `SELECT m.thread_id FROM automation_thread_marks m
+         WHERE m.thread_id = ? AND NOT EXISTS (
+           SELECT 1 FROM automations a
+           WHERE a.id = m.automation_id AND a.target_thread_id = m.thread_id
+         ) LIMIT 1`,
       )
-      .get(threadId) !== undefined ||
-    db
-      .prepare(`SELECT id FROM automation_runs WHERE thread_id = ? LIMIT 1`)
       .get(threadId) !== undefined
   );
 }

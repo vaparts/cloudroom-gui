@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@cloudroom/shared-ui/button";
 import { Icon } from "@cloudroom/shared-ui/icon";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@cloudroom/shared-ui/tooltip";
@@ -65,6 +65,60 @@ export function CloudGithubCard({ className }: { className?: string }) {
         <Button type="button" size="sm" onClick={() => openUrlInExternalBrowser("https://www.cloudroom.dev/github")}><Icon name="GithubLogo" aria-hidden />Sign in with GitHub</Button>
       </div>
     </section>
+  );
+}
+
+export function FreePlanCard() {
+  const usage = useCloudroomAccount().data?.planUsage ?? null;
+  if (!usage) return null;
+  const rows = [
+    { label: "cloud agents", used: usage.agents, limit: usage.agentsLimit },
+    ...(usage.cpuHours === null ? [] : [{ label: "cloud hours", used: usage.cpuHours, limit: usage.cpuHoursLimit }]),
+  ];
+  return (
+    <section aria-label="Free plan" className="rounded-lg border border-border bg-surface-raised-solid p-3">
+      <p className="text-xs text-muted-foreground">Free plan</p>
+      {rows.map(({ label, used, limit }) => {
+        const share = limit > 0 ? Math.min(used / limit, 1) : 1;
+        const low = share >= 0.8;
+        return (
+          <div key={label} className="mt-2.5">
+            <p className="mb-1.5 text-sm text-foreground"><span className={cn("font-semibold", low && "text-warning")}>{Math.max(0, Math.floor(limit - used)).toLocaleString("en-US")}</span> {label} left</p>
+            <div className="h-1 overflow-hidden rounded-full bg-foreground/10"><div className={cn("h-full rounded-full", low ? "bg-warning" : "bg-primary")} style={{ width: `${share * 100}%` }} /></div>
+          </div>
+        );
+      })}
+      <Button type="button" size="sm" className="mt-3 w-full" onClick={upgrade}>
+        Get 10× more with Pro<span className="ml-auto font-normal opacity-70">$50/mo</span><Icon name="ArrowRight" aria-hidden />
+      </Button>
+    </section>
+  );
+}
+
+const PRO_REASONS = [
+  "Pro gives you 1,000 cloud agents a month. Free gives you 100.",
+  "Pro runs your cloud agents on 2× more powerful sandboxes.",
+  "Pro has no daily limit. Free stops at 50 new cloud agents a day.",
+  "Pro gives you 300+ hours of agent work every month.",
+  "Pro keeps cloud agents awake 4× longer, so they reply faster.",
+  "Pro cloud agents never get paused when the cloud gets busy.",
+  "Pro keeps your chat history for 1 year. Free keeps 60 days.",
+];
+let lastReason = Math.floor(Math.random() * PRO_REASONS.length);
+const nextReason = () => PRO_REASONS[(lastReason = (lastReason + 1) % PRO_REASONS.length)];
+
+export function FreePlanTip() {
+  const usage = useCloudroomAccount().data?.planUsage ?? null;
+  const [reason] = useState(nextReason);
+  if (!usage) return null;
+  return (
+    <p className="mt-3 flex min-w-0 items-center gap-2 px-3.5 text-xs text-muted-foreground">
+      <Icon name="Zap" className="size-3.5 shrink-0 text-primary-text" aria-hidden />
+      <span className="truncate">{reason}</span>
+      <Button type="button" variant="link" size="sm" className="h-auto shrink-0 gap-0.5 p-0 text-xs font-semibold" onClick={upgrade}>
+        Upgrade<Icon name="ArrowRight" aria-hidden />
+      </Button>
+    </p>
   );
 }
 

@@ -41,6 +41,8 @@ export interface CloudroomStatus {
   cloudQueue?: { position: number; total: number; regionBlocked: boolean } | null;
   /** Free Cloud needs a GitHub sign-in at least 30 days old. */
   githubRequired?: boolean;
+  /** A Free account's 30-day usage, for the sidebar upgrade card. Null for paid plans or while in the cloud queue. */
+  planUsage?: { agents: number; agentsLimit: number; cpuHours: number | null; cpuHoursLimit: number } | null;
 }
 
 export interface CloudroomCodexAuth {
@@ -116,8 +118,12 @@ export interface CloudAutomation {
   runs: number;
   origin: "app" | "agent";
   created_at: string;
+  /** Each run starts a fresh Cloud thread in its own sandbox (ADR 0239). Missing until the website's 0069 update. */
+  new_thread?: boolean;
+  /** Runs first in the thread's sandbox: no output skips the run, output goes to the agent (ADR 0246). */
+  script?: string | null;
 }
-export type CloudAutomationFields = { name?: string; prompt?: string; cron?: string | null; timezone?: string; run_at?: string | null; enabled?: boolean };
+export type CloudAutomationFields = { name?: string; prompt?: string; cron?: string | null; timezone?: string; run_at?: string | null; enabled?: boolean; script?: string | null; new_thread?: boolean };
 export type CloudAutomationRequest =
   | { action: "list"; thread?: string }
   | ({ action: "create"; thread: string } & CloudAutomationFields)
@@ -144,6 +150,9 @@ export interface MacMcpServer {
   macOnly: boolean;
   signIn?: "needed" | "done";
 }
+
+/** A CLI on this Mac with the setup-script lines that install it in a cloud sandbox. `key`: the API key it signs in with. */
+export interface MacCli { name: string; title: string; key?: string; install: string }
 
 export interface ClaudeAccountInput { action?: "login" | "cancel" | "complete" | "setup-token" | "key" | "token"; requestId?: string; code?: string; state?: string; apiKey?: string; token?: string; plan?: string }
 
@@ -191,6 +200,8 @@ export interface CloudroomArea {
   cloudSkills(signal?: AbortSignal): Promise<CloudSkills>;
   /** Adds or removes skills, or sets whether new skills go to the cloud. Uploads in the background. */
   setCloudSkills(change: CloudSkillsChange): Promise<CloudSkills>;
+  /** CLIs on this Mac that the setup script can install in every cloud sandbox. */
+  macClis(signal?: AbortSignal): Promise<{ clis: MacCli[] }>;
   /** This Mac's MCP servers. `CloudEnvironment.mcp` says which ones every new cloud thread gets. */
   macMcpServers(signal?: AbortSignal): Promise<{ servers: MacMcpServer[] }>;
   /** Copies MCP servers from this Mac to the Cloud environment, or removes them. */
@@ -255,7 +266,7 @@ export interface BbImportResult {
 }
 
 export interface NativeSession {
-  harness: "claude-code" | "codex";
+  harness: "claude-code" | "codex" | "pi" | "acp-hermes-agent";
   id: string;
   title: string;
   cwd: string;
@@ -310,6 +321,7 @@ export function createCloudroomArea({ transport }: CreateSdkAreaArgs): Cloudroom
     importMacVariables: (names) => transport.readJson(request("/environment/mac", { names })) as Promise<CloudEnvironment>,
     cloudSkills: (signal) => transport.readJson(request("/skills", undefined, signal)) as Promise<CloudSkills>,
     setCloudSkills: (change) => transport.readJson(request("/skills", change)) as Promise<CloudSkills>,
+    macClis: (signal) => transport.readJson(request("/clis", undefined, signal)) as Promise<{ clis: MacCli[] }>,
     macMcpServers: (signal) => transport.readJson(request("/mcp", undefined, signal)) as Promise<{ servers: MacMcpServer[] }>,
     setCloudMcp: (change) => transport.readJson(request("/mcp", change)) as Promise<CloudEnvironment>,
     startMcpSignIn: (name) => transport.readJson(request("/mcp/sign-in", { name })) as Promise<{ url: string }>,

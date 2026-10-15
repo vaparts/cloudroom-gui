@@ -128,14 +128,27 @@ export function completeClaudeInference(
     child.once("close", (code) => {
       clearTimeout(timer);
       const result = parseResult(stdout, input.model);
-      resolve(
+      const outcome =
         code !== 0 && !result.ok
           ? failure(
               "request_failed",
-              stderr.trim().replace(/sk-[a-zA-Z0-9_-]+/gu, "[redacted]") ||
-                `Claude Code exited with code ${code}.`,
+              stderr.trim() ||
+                // Errors like a failed sign-in arrive in the JSON result, not on stderr.
+                (result.code === "request_failed"
+                  ? result.message
+                  : `Claude Code exited with code ${code}.`),
             )
-          : result,
+          : result;
+      resolve(
+        outcome.ok
+          ? outcome
+          : {
+              ...outcome,
+              message: outcome.message.replace(
+                /sk-[a-zA-Z0-9_-]+/gu,
+                "[redacted]",
+              ),
+            },
       );
     });
     // Spawn failures already surface through the child's error event.

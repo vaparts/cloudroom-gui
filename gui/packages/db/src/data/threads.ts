@@ -261,6 +261,8 @@ function upsertThreadTitleSearchSegments(
 }
 
 export interface CreateThreadInput {
+  /** Only for a thread that already exists elsewhere under this ID, such as a Cloud thread a cloud automation started. */
+  id?: string;
   executionTarget?: "local" | "cloud";
   projectId: string;
   environmentId?: string | null;
@@ -284,7 +286,7 @@ export function createThread(
 ) {
   const visibility = input.visibility ?? "visible";
   const now = Date.now();
-  const id = createThreadId();
+  const id = input.id ?? createThreadId();
   const originKind = input.originKind ?? null;
   const thread = db.transaction(
     (tx) => {

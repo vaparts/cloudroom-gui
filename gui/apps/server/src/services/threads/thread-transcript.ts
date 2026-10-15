@@ -6,6 +6,7 @@ import {
 } from "@cloudroom/db";
 import {
   THREAD_HARNESS_SWITCH_OPERATION,
+  THREAD_IMPORT_OPERATION,
   promptInputSchema,
   type PromptInput,
 } from "@cloudroom/domain";
@@ -89,8 +90,8 @@ export const transcriptMarkdown = (
 const switchMetadataSchema = z.object({ seed: z.array(promptInputSchema) });
 
 /**
- * After a harness switch (ADR 0211), the new harness's first turn carries the earlier conversation as agent-only
- * input, saved on the switch event. It stays pending until a turn starts after the switch.
+ * After a harness switch (ADR 0211) or a text-only chat import, the first turn carries the earlier conversation as
+ * agent-only input, saved on that event. It stays pending until a turn starts after it. Forked imports carry no seed.
  */
 export function pendingHarnessSwitchSeed(
   db: DbQueryConnection,
@@ -103,7 +104,7 @@ export function pendingHarnessSwitchSeed(
       and(
         eq(events.threadId, threadId),
         eq(events.type, "system/operation"),
-        sql`json_extract(${events.data}, '$.operation') = ${THREAD_HARNESS_SWITCH_OPERATION}`,
+        sql`json_extract(${events.data}, '$.operation') IN (${THREAD_HARNESS_SWITCH_OPERATION}, ${THREAD_IMPORT_OPERATION})`,
       ),
     )
     .orderBy(desc(events.sequence))

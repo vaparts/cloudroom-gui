@@ -17,11 +17,12 @@ import { MAC_MCP_KEY, useMcpSignIn } from "@/components/CloudMcpSignIn";
 
 const ENVIRONMENT_KEY = ["cloudroom-environment"];
 const SKILLS_KEY = ["cloudroom-cloud-skills"];
+const CLIS_KEY = ["cloudroom-mac-clis"];
 const VARIABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const PREINSTALLED = "Node.js · Git · GitHub CLI · Claude Code · Codex · Pi · Cursor";
 // Dimmer than the default placeholder, so the example never reads as saved text.
 const DIM_PLACEHOLDER = "placeholder:text-subtle-foreground/60";
-const SCRIPT_PLACEHOLDER = "# Runs once in each new cloud sandbox, as the agent. sudo works.\nnpm install -g vercel";
+const SCRIPT_PLACEHOLDER = "# Runs once in each new cloud sandbox, as the agent. sudo works.\nsudo npm install -g vercel";
 
 export const errorText = (error: unknown) => (error instanceof Error ? error.message : error ? String(error) : null);
 
@@ -65,7 +66,7 @@ export function CloudEnvironmentSettingsSection() {
           <McpCard inCloud={data.mcp} onSaved={saved} />
           <VariablesCard environment={data} busy={update.isPending} onChange={(change) => update.mutateAsync(change)} onImported={saved} />
           <ReposCard repos={data.repos} busy={update.isPending} onChange={(change) => update.mutateAsync(change)} />
-          <SetupScriptCard setup={data.setup} onSave={(setup) => update.mutateAsync({ action: "setup", setup })} />
+          <SetupScriptCard setup={data.setup} keys={data.variables.map((variable) => variable.name)} onSave={(setup) => update.mutateAsync({ action: "setup", setup })} />
         </>
       )}
       {update.error && (
@@ -633,17 +634,52 @@ function ReposCard({ repos, busy, onChange }: { repos: string[]; busy: boolean; 
   );
 }
 
-function SetupScriptCard({ setup, onSave }: { setup: string; onSave: (setup: string) => Promise<unknown> }) {
+/** CLI chips add or remove their Linux install lines, so the script stays the one place they live. */
+function SetupScriptCard({ setup, keys, onSave }: { setup: string; keys: string[]; onSave: (setup: string) => Promise<unknown> }) {
   const [draft, setDraft] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const clis = useQuery({ queryKey: CLIS_KEY, queryFn: ({ signal }) => sdk.cloudroom.macClis(signal), retry: false }).data?.clis ?? [];
   const script = draft ?? setup;
   const dirty = draft !== null && draft !== setup;
+  const toggle = (install: string) => {
+    const part = [`\n\n${install}`, `${install}\n\n`, install].find((text) => script.includes(text));
+    setDraft(part ? script.replace(part, "") : script.trim() ? `${script.trimEnd()}\n\n${install}` : install);
+  };
+  const unsigned = clis.filter((cli) => cli.key && script.includes(cli.install) && !keys.includes(cli.key));
   const save = () => {
     setSaving(true);
     void onSave(script).then(() => setDraft(null), () => {}).finally(() => setSaving(false));
   };
   return (
     <Card icon="Terminal" title="Setup script" description="Runs once in each new cloud sandbox, in the background. Output: /var/log/cloudroom/setup.log">
+      {clis.length > 0 && (
+        <div className="border-t border-border px-4 py-3">
+          <p className="mb-2 text-xs text-subtle-foreground">Add a CLI from your Mac. A click adds its Linux install lines below.</p>
+          <div className="flex flex-wrap gap-1.5">
+            {clis.map((cli) => {
+              const added = script.includes(cli.install);
+              return (
+                <button
+                  key={cli.name}
+                  type="button"
+                  title={cli.title}
+                  aria-pressed={added}
+                  disabled={saving}
+                  onClick={() => toggle(cli.install)}
+                  className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 font-mono text-xs transition-colors disabled:cursor-wait ${
+                    added
+                      ? "border-primary/40 bg-primary/15 text-primary-text hover:bg-primary/25"
+                      : "border-dashed border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground"
+                  }`}
+                >
+                  <Icon name={added ? "Check" : "Plus"} className="size-3" />
+                  {cli.name}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
       <div className="border-t border-border p-3">
         <Textarea
           className={`min-h-36 resize-y font-mono text-xs leading-relaxed ${DIM_PLACEHOLDER}`}
@@ -654,6 +690,14 @@ function SetupScriptCard({ setup, onSave }: { setup: string; onSave: (setup: str
           onChange={(event) => setDraft(event.target.value)}
         />
       </div>
+      {unsigned.map((cli) => (
+        <p key={cli.name} className="flex items-center gap-2.5 border-t border-border px-4 py-2.5 text-xs text-subtle-foreground">
+          <Icon name="Lock" className="size-3.5 shrink-0" />
+          <span>
+            <span className="font-mono text-foreground">{cli.name}</span> signs in with <code className="font-mono text-foreground/80">{cli.key}</code>. Add it under API keys.
+          </span>
+        </p>
+      ))}
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-surface-recessed/40 px-4 py-3">
         <p className="min-w-0 text-xs text-subtle-foreground">
           Already installed: <span className="text-foreground/80">{PREINSTALLED}</span>

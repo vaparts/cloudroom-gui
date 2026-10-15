@@ -14,7 +14,7 @@ import { BbLogo } from "@/components/ui/bb-logo";
 import { appToast } from "@/components/ui/app-toast";
 import { useCreateProject } from "@/hooks/mutations/project-mutations";
 import { useUpdateGeneralSettings } from "@/hooks/mutations/settings-mutations";
-import { cloudCanRunHarness, useCloudroomAccount, useCloudroomSignIn, useImportBb, useMacAgents, useSetCopyLogins, useSetMacAccess } from "@/hooks/queries/cloudroom-queries";
+import { cloudCanRunHarness, useCloudroomAccount, useCloudroomSignIn, useImportBb, useMacAgents, useNativeSessions, useProjectSuggestions, useSetCopyLogins, useSetMacAccess } from "@/hooks/queries/cloudroom-queries";
 import { useSidebarNavigation } from "@/hooks/queries/sidebar-navigation-query";
 import { useHostDaemon } from "@/hooks/useHostDaemon";
 import { usePathPickerHost } from "@/hooks/useLocalPathPicker";
@@ -38,8 +38,7 @@ export const useOpenSetup = () => useSetAtom(openAtom);
 const STEPS = ["Sign in", "Connect an agent", "Connect GitHub", "Import your work"];
 const STEP_IDS = ["account", "agent", "github", "project"] as const;
 type SetupStepId = (typeof STEP_IDS)[number];
-type SetupDetail = "claude" | "codex" | "both" | "none" | "existing" | "found" | "folder" | "bb_import" | "chat_import" | "pi" | "opencode" | "cursor" | "hermes" | "grok" | "devin";
-/** The telemetry name of an extra agent: `acp-hermes-agent` is `hermes`. */
+type SetupDetail = "claude" | "codex" | "both" | "none" | "existing" | "found" | "folder" | "recent_folder" | "bb_import" | "chat_import" | "pi" | "opencode" | "cursor" | "hermes" | "grok" | "devin";
 const agentDetail = (id: string) => id.replace(/^acp-/, "").replace(/-agent$/, "") as SetupDetail;
 function track(step: SetupStepId, action: "viewed" | "started" | "done" | "skipped" | "closed" | "detected", detail: SetupDetail | null = null, agents?: SetupDetail[]) {
   void fetchWithAppSurface("/api/v1/cloudroom/setup-step", {
@@ -72,11 +71,12 @@ export function useSetupProgress() {
     retry: false,
     refetchInterval: (query) => (query.state.data?.state === "waiting" ? 1500 : false),
   });
-  // An agent besides Claude Code and Codex counts once the user picks it as their default.
   const defaultAgent = useSystemConfig().data?.generalSettings.defaultProviderId ?? null;
-  const other = defaultAgent === "claude-code" || defaultAgent === "codex" ? null : defaultAgent;
-  const otherName = useSystemProviders().data?.find((provider) => provider.id === other)?.displayName ?? other;
-  const agents = { claude: claude.data?.state === "connected", codex: codex.data?.state === "connected", other, otherName };
+  const extra = defaultAgent === "claude-code" || defaultAgent === "codex" ? null : defaultAgent;
+  const provider = useSystemProviders().data?.find((entry) => entry.id === extra);
+  const signedIn = useMacAgents(extra !== null).data?.includes(extra ?? "") === true;
+  const other = provider && signedIn ? provider.id : null;
+  const agents = { claude: claude.data?.state === "connected", codex: codex.data?.state === "connected", other, otherName: other && provider?.displayName };
   const done = [Boolean(accountId), agents.claude || agents.codex || other !== null, github.data?.state === "connected"];
   return { account, ready, offline, agents, codex, github, done, complete: done.every(Boolean), checking: account.isPending };
 }
@@ -224,7 +224,6 @@ function Setup({ locked, close }: { locked: boolean; close: () => void }) {
   );
 }
 
-/** Makes an agent the default for new threads, in Settings and in the composer. */
 function useSetDefaultAgent() {
   const settings = useSystemConfig().data?.generalSettings;
   const update = useUpdateGeneralSettings();
@@ -503,10 +502,7 @@ function AgentLogo({ id, className, small = false }: { id: string; className: st
   );
 }
 
-/** Agents besides Claude Code and Codex, installed and signed in on this Mac, as one quiet row of chips.
- *  Picking one makes it the default agent. Nothing shows when the Mac has none. */
 function MoreAgents({ agents, picked, pick }: { agents: string[]; picked: string | null; pick: (agent: string) => void }) {
-  // Only agents the app can run here, so picking one never leaves a default it can't start.
   const providers = useSystemProviders().data ?? [];
   const shown = agents.flatMap((id) => providers.filter((provider) => provider.id === id));
   if (!shown.length) return null;
@@ -662,15 +658,17 @@ function ProjectStep({ close }: { close: () => void }) {
   const { canUseNativeFolderPicker, clientHostId, hostId } = usePathPickerHost();
   const { localHostId } = useHostDaemon();
   const importBb = useImportBb();
+  const empty = useNativeSessions().data?.sessions.length === 0;
+  const recent = useProjectSuggestions()?.repos.filter((repo) => repo.source === "mac").slice(0, empty ? 3 : 2) ?? [];
   const add = useMutation({
-    mutationFn: async () => {
-      const folder = hostId && clientHostId ? (await sdk.hosts.pickFolder({ hostId, clientHostId })).path : null;
+    mutationFn: async (path?: string) => {
+      const folder = path ?? (hostId && clientHostId ? (await sdk.hosts.pickFolder({ hostId, clientHostId })).path : null);
       if (!folder || !hostId) return null;
       return createProject.mutateAsync({ name: deriveProjectNameFromPath(folder), source: { type: "local_path", hostId, path: folder } });
     },
-    onSuccess: (project) => {
+    onSuccess: (project, path) => {
       if (!project) return;
-      track("project", "done", "folder");
+      track("project", "done", path ? "recent_folder" : "folder");
       setProjectId(project.id);
       selectCloudForNewThreads();
       void navigate(getRootComposeRoutePath());
@@ -679,7 +677,7 @@ function ProjectStep({ close }: { close: () => void }) {
     onError: (error) => appToast.error(error.message),
   });
   const addFolder = () => {
-    if (canUseNativeFolderPicker) return add.mutate();
+    if (canUseNativeFolderPicker) return add.mutate(undefined);
     selectCloudForNewThreads();
     track("project", "started", "folder");
     close();
@@ -693,18 +691,51 @@ function ProjectStep({ close }: { close: () => void }) {
       onError: (error) => appToast.error(error.message),
     });
   };
+  const startEmpty = () => { track("project", "skipped"); close(); };
+  const opening = add.isPending ? add.variables : null;
   return (
     <>
-      <Heading lead="Import your" mark="work" />
-      <p className="mt-3 max-w-[560px] text-base text-(--ob-muted)">Your Claude Code and Codex chats move over with full memory. Originals stay untouched.</p>
+      {empty ? <Heading lead="Start your first" mark="project" /> : <Heading lead="Import your" mark="work" />}
+      <p className="mt-3 max-w-[560px] text-base text-(--ob-muted)">{empty ? "No agent chats to import. Pick a folder and your first agent starts there." : "Your agent chats move over. Originals stay untouched."}</p>
       <div className="mt-7">
-        <ImportChats onDone={() => track("project", "started", "chat_import")} />
+        <ImportChats
+          onDone={() => track("project", "started", "chat_import")}
+          empty={(
+            <button type="button" disabled={add.isPending} onClick={addFolder} className="flex h-[88px] w-[640px] max-w-full items-center gap-4 border-2 border-(--ob-ink) bg-(--ob-lime) px-7 text-[25px] font-bold text-black shadow-[7px_7px_0_var(--ob-ink)] transition-transform hover:-translate-y-0.5 active:translate-x-0.5 active:translate-y-0.5 active:shadow-[3px_3px_0_var(--ob-ink)] disabled:opacity-60 [&_svg]:size-7">
+              <Icon name="Folder" aria-hidden />
+              {opening === undefined ? "Opening…" : "Open a folder"}
+            </button>
+          )}
+        />
       </div>
-      <p className="mt-9 text-[13.5px] text-(--ob-muted)">
-        Don’t use Claude Code or Codex yet?{" "}
-        <button type="button" className={QUIET_LINK} onClick={() => { track("project", "skipped"); close(); }}>Start empty</button>
-        {" or "}
-        <button type="button" className={QUIET_LINK} disabled={add.isPending} onClick={addFolder}>{add.isPending ? "opening a folder…" : "open a folder"}</button>.
+      {recent.length > 0 && (
+        <div className="mt-9 max-w-[640px]">
+          <p className="mb-2.5 text-[11.5px] tracking-[0.12em] text-(--ob-muted) uppercase">{empty ? "Recent on this Mac" : "Or open a recent folder"}</p>
+          <ul className="divide-y divide-(--ob-line) border-[1.5px] border-(--ob-ink) bg-(--ob-card)">
+            {recent.map((repo) => (
+              <li key={repo.path} className="flex items-center gap-4 px-5 py-3.5">
+                <Icon name="FolderGit" className="size-5 shrink-0 text-(--ob-muted)" aria-hidden />
+                <div className="min-w-0">
+                  <p className="truncate text-[15px] font-semibold">{repo.name}</p>
+                  <p className="truncate text-[12.5px] text-(--ob-muted)">{repo.path.replace(/^\/(Users|home)\/[^/]+/, "~")}</p>
+                </div>
+                <Outline className="ml-auto shadow-[3px_3px_0_var(--ob-ink)]" disabled={add.isPending} onClick={() => add.mutate(repo.path)}>
+                  {opening === repo.path ? "Opening…" : "Open"}
+                </Outline>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <p className="mt-8 text-[13.5px] text-(--ob-muted)">
+        {empty ? "Not ready? " : (
+          <>
+            <button type="button" className={QUIET_LINK} disabled={add.isPending} onClick={addFolder}>Open a folder</button>
+            <span aria-hidden className="mx-2 text-(--ob-dash)">·</span>
+          </>
+        )}
+        <button type="button" className={QUIET_LINK} onClick={startEmpty}>Start empty</button>
+        {empty && " and pick a project later."}
         <span aria-hidden className="mx-2 text-(--ob-dash)">·</span>
         <button type="button" className={QUIET_LINK} disabled={importBb.isPending} onClick={bringWorkOver}>
           {importBb.isPending ? "Bringing your BB threads over…" : "Coming from BB?"}

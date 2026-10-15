@@ -4,8 +4,8 @@
 
 A plugin can contribute a full agent provider: a picker entry whose threads
 run on a **provider bridge** the plugin ships. The working reference is
-`examples/plugins/echo-provider` — declaration, bridge, and conformance test
-in one small package.
+`examples/plugins/echo-provider` — declaration and bridge in one small
+package.
 
 ```ts
 bb.providers.register({
@@ -292,10 +292,9 @@ with your provider id and a transport whose `send` calls it and whose
 (`experimental_captureBridgeJsonRpcOutput().takeMessages`; the kit assembles
 your `thread/delta` batches itself, through the runtime's real assembler), and
 assert every scenario passes (see
-`examples/plugins/echo-provider/provider-bridge.conformance.test.ts`). The
+`tests/scripted-echo-provider/provider-bridge.conformance.test.ts`). The
 same kit assembles your deltas into canonical events, so a second test can
-assert what each row becomes
-(`examples/plugins/echo-provider/provider-bridge.stream.test.ts`). Never
+assert what each row becomes. Never
 import a private `@cloudroom/*` package from a plugin: an installed plugin cannot
 resolve it.
 
@@ -320,8 +319,7 @@ passes a `ReplayProviderProfile` whose `env` (or `rewriteRuntimeLine`) points
 the child at the kit's replay script. When a deliberate bridge change alters
 the stream, `experimental_rerecordCurrentBridgeLane` writes the new
 expectation beside the recording (`bridge→runtime.current.ndjson`); the
-recording itself is never rewritten. See
-`examples/plugins/echo-provider/provider-bridge.parity.test.ts`.
+recording itself is never rewritten.
 
 **Delivery.** On install/reload the server builds `dist/host.js` and records
 its digest. Thread commands for the provider carry `{pluginId, digest}` to the

@@ -290,6 +290,10 @@ export interface ThreadActionArgs {
   threadId: string;
 }
 
+export interface ThreadUnarchiveArgs extends ThreadActionArgs {
+  keepParent?: boolean;
+}
+
 export interface ThreadGoalSetArgs extends ThreadActionArgs {
   status?: "active" | "paused";
   objective?: string;
@@ -603,7 +607,7 @@ export interface ThreadsArea {
   storageFiles(args: ThreadStorageFilesArgs): Promise<ThreadStorageFilesResult>;
   storageLocation(args: ThreadStatusArgs): Promise<ThreadStorageLocationResult>;
   storagePaths(args: ThreadStoragePathsArgs): Promise<ThreadStoragePathsResult>;
-  unarchive(args: ThreadActionArgs): Promise<ThreadUnarchiveResult>;
+  unarchive(args: ThreadUnarchiveArgs): Promise<ThreadUnarchiveResult>;
   unpin(args: ThreadActionArgs): Promise<ThreadMutationResult>;
   update(args: ThreadUpdateArgs): Promise<ThreadMutationResult>;
   wait(args: ThreadWaitArgs): Promise<ThreadWaitResult>;
@@ -1412,6 +1416,7 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
       await transport.readVoid(
         transport.api.v1.threads[":id"].unarchive.$post({
           param: { id: input.threadId },
+          ...(input.keepParent ? { query: { keepParent: "true" } } : {}),
         }),
       );
       return { ok: true };

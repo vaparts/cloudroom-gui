@@ -2,6 +2,33 @@
 
 Also on [cloudroom.dev/changelog](https://www.cloudroom.dev/changelog).
 
+## 105
+
+Safer archiving and steadier automations (2026-10-15)
+
+### Changes
+
+- Cloud automations keep running after you archive their chat, and recurring ones start a fresh thread for each run.
+- Archiving asks first if anything in the thread is still running, and Undo keeps sub-agents under their parent.
+- The expand arrow in the sidebar no longer jumps under the Archive button.
+- Free accounts see how many cloud agents and hours are left, with a one-click upgrade when they hit a limit.
+- Settings marks which agents are Mac only, and setup offers your other signed-in agents.
+- Image previews close when you add the image to chat, and thread notes are shorter.
+
+## 104
+
+Steadier Cloud threads and quick forks (2026-10-14)
+
+### Changes
+
+- Run Devin in Cloud threads, using your Mac's Devin login.
+- Select text in a chat to reply, fork a new thread with it quoted, or open a side chat.
+- Import chats from Pi and Hermes, and open a folder in one click when you have no chats yet.
+- Add your Mac's CLIs to a Cloud environment's setup script with one click.
+- Smarter thread names, exact model names in pickers, and new sidebar icons.
+- Switching a running Claude Code thread to Manual now takes effect on your next message.
+- Cloud threads no longer freeze on a stuck message, subagents no longer start twice, and error cards can be closed. Security fixes.
+
 ## 103
 
 Cloud queue and clearer threads (2026-10-13)

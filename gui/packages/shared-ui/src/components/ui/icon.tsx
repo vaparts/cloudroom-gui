@@ -14,7 +14,6 @@ import {
   ArrowLeft01Icon,
   ArrowRight01Icon,
   BotIcon,
-  BubbleChatAddIcon,
   BubbleChatIcon,
   Bug01Icon,
   Cancel01Icon,
@@ -40,9 +39,7 @@ import {
   InformationCircleIcon,
   Loading03Icon,
   MessageQuestionIcon,
-  MoreHorizontalIcon,
   Search01Icon,
-  Settings01Icon,
   SidebarLeftIcon,
   SlidersHorizontalIcon,
   SourceCodeIcon,
@@ -65,6 +62,7 @@ import {
   getExtendedIcons,
   subscribeExtendedIcons,
 } from "./icon-registry";
+import { SoftMoreIcon, SoftNewThreadIcon, SoftSettingsIcon } from "./icon-soft";
 
 const SectionAddStrokeRoundedIcon: IconSvgElement = [
   [
@@ -142,14 +140,14 @@ const CORE_ICON_MAP = {
   ListTodo: CheckListIcon,
   Loading: Loading03Icon,
   MessageQuestion: MessageQuestionIcon,
-  MessageCirclePlus: BubbleChatAddIcon,
-  MessageSquarePlus: BubbleChatAddIcon,
+  MessageCirclePlus: SoftNewThreadIcon,
+  MessageSquarePlus: SoftNewThreadIcon,
   MessageSquare: BubbleChatIcon,
-  MoreHorizontal: MoreHorizontalIcon,
+  MoreHorizontal: SoftMoreIcon,
   PanelLeft: SidebarLeftIcon,
   Search: Search01Icon,
   SectionAdd: SectionAddStrokeRoundedIcon,
-  Settings: Settings01Icon,
+  Settings: SoftSettingsIcon,
   SlidersHorizontal: SlidersHorizontalIcon,
   Spinner: DashedLineCircleIcon,
   Target: Target02Icon,

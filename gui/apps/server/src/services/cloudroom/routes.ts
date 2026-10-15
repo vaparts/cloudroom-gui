@@ -22,6 +22,7 @@ import { exportableChats, exportChats } from "./chat-export.js";
 import { copyToMac, openOnMac, teleportingToLocal, teleportToLocal } from "./teleport-local.js";
 import { cloudEnvironmentRequestSchema, macCodexLogin, macMcpServers, macSkills, macVariables, sandboxThread, startMacCodexLogin, type CloudEnvironmentRequest } from "./sandboxes.js";
 import { CloudroomError } from "./client.js";
+import { macClis } from "./clis.js";
 import { finishMcpSignIn, isRemoteMcp, startMcpSignIn } from "./mcp-login.js";
 import { archiveThreadAndChildren } from "../threads/thread-archive.js";
 import { queueChildThreadTurnNotificationBestEffort } from "../threads/child-thread-notifications.js";
@@ -98,7 +99,7 @@ export function installCloudroomRoutes(app: Hono, deps: AppDeps): void {
   app.post("/api/v1/cloudroom/import/sessions", async context => {
     const input = z.object({
       hostId: z.string().min(1),
-      sessions: z.array(z.object({ harness: z.enum(["claude-code", "codex"]), id: z.string().min(1) }).strict()).min(1).max(2000),
+      sessions: z.array(z.object({ harness: z.enum(["claude-code", "codex", "pi", "acp-hermes-agent"]), id: z.string().min(1) }).strict()).min(1).max(2000),
     }).strict().parse(await context.req.json());
     return context.json(await importNativeSessions(deps, input.hostId, input.sessions));
   });
@@ -256,6 +257,8 @@ export function installCloudroomRoutes(app: Hono, deps: AppDeps): void {
     await change;
     return context.json(await skillList());
   });
+  // CLIs on this Mac that Cloudroom knows how to install in a sandbox. The app adds them to the setup script.
+  app.get("/api/v1/cloudroom/account/clis", (context) => context.json({ clis: macClis() }));
   // MCP servers from this Mac. The Cloud environment answer says which are in the cloud; their keys go straight to the website.
   // `signIn` marks cloud servers that use OAuth: "needed" until the user signs in once for the cloud, then "done".
   app.get("/api/v1/cloudroom/account/mcp", async (context) => {

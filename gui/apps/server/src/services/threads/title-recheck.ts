@@ -3,6 +3,7 @@ import type { PromptInput } from "@cloudroom/domain";
 import { and, eq } from "drizzle-orm";
 import type { CommandResultSideEffectsDeps } from "../../internal/command-result-side-effects.js";
 import type { SandboxDirectory } from "../cloudroom/sandboxes.js";
+import { INFERENCE_POLICY } from "../ai/inference.js";
 import { runtimeErrorLogFields } from "../lib/error-log-fields.js";
 import { readUiPreferences } from "../system/ui-preferences.js";
 import { syncGeneratedTitleToProvider } from "./thread-commands.js";
@@ -120,6 +121,7 @@ async function recheckTitle(
     agentReply,
     input: pending.input,
     threadId,
+    timeoutMaxAttempts: INFERENCE_POLICY.threadMetadata.maxAttempts,
   });
   const title = outcome.metadata?.title;
   if (

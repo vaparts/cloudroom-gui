@@ -102,6 +102,10 @@
       "type": "registry:ui"
     },
     {
+      "name": "icon-soft",
+      "type": "registry:ui"
+    },
+    {
       "name": "input",
       "type": "registry:ui"
     },

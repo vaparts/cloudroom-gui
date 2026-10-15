@@ -137,6 +137,10 @@ beforeEach(() => {
     ok: true,
   });
   vi.mocked(sdk.threads.unarchive).mockResolvedValue({ ok: true });
+  vi.mocked(sdk.threads.childSummary).mockResolvedValue({
+    nonDeletedChildCount: 1,
+    runningThreadCount: 0,
+  });
   mocks.closePanesForThreads.mockReturnValue({
     focusedRoute: null,
     removedAny: false,
@@ -179,9 +183,11 @@ describe("ThreadActionsProvider archive feedback", () => {
       expect(sdk.threads.unarchive).toHaveBeenCalledTimes(2);
     });
     expect(sdk.threads.unarchive).toHaveBeenNthCalledWith(1, {
+      keepParent: true,
       threadId: "thr_parent",
     });
     expect(sdk.threads.unarchive).toHaveBeenNthCalledWith(2, {
+      keepParent: true,
       threadId: "thr_child",
     });
   });

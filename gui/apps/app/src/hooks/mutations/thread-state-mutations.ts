@@ -330,8 +330,11 @@ export function useUnarchiveThread() {
     meta: {
       errorMessage: "Failed to unarchive thread.",
     },
-    mutationFn: async ({ id }: ThreadMutationRequest) => {
-      await sdk.threads.unarchive({ threadId: id });
+    mutationFn: async ({
+      id,
+      keepParent,
+    }: ThreadMutationRequest & { keepParent?: boolean }) => {
+      await sdk.threads.unarchive({ threadId: id, keepParent });
     },
     onMutate: async ({ id }): Promise<ThreadListMutationTransaction> =>
       beginUnarchiveThreadTransaction({ queryClient, threadId: id }),

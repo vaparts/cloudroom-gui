@@ -8,6 +8,8 @@ import {
   type ForkThreadCreateSeed,
 } from "@cloudroom/client-core";
 import { getRootComposeRoutePath } from "@/lib/route-paths";
+import { getPromptDraftAccessor } from "@/hooks/usePromptDraftStorage";
+import type { ThreadTimelineForkMessageHandler } from "@/components/thread/timeline/types";
 import { getThreadDisplayTitle } from "@/lib/thread-title";
 import { useSetRootComposeProjectId } from "@/lib/root-compose-selection";
 import { threadDefaultExecutionOptionsQueryKey } from "@/hooks/queries/query-keys";
@@ -18,9 +20,7 @@ interface UseForkThreadFromMessageArgs {
   sourceThread: Thread | null;
 }
 
-interface ForkThreadFromMessageTarget {
-  sourceSeqEnd: number;
-}
+type ForkThreadFromMessageTarget = Parameters<ThreadTimelineForkMessageHandler>[0];
 
 export function useForkThreadFromMessage({
   sourceThread,
@@ -77,6 +77,13 @@ export function useForkThreadFromMessage({
           sourceThreadId: source.id,
           sourceThreadTitle: getThreadDisplayTitle(source),
         };
+        if (target.context !== undefined) {
+          getPromptDraftAccessor({ kind: "new-thread" }).addQuote(
+            target.context.text,
+            undefined,
+            { messageNumber: target.context.messageNumber },
+          );
+        }
         setRootComposeProjectId(source.projectId);
         navigate(getRootComposeRoutePath(), {
           state: {

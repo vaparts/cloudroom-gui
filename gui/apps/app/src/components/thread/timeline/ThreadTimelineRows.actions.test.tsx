@@ -868,7 +868,7 @@ describe("ThreadTimelineRows actions", () => {
     mockWindowSelection({ node: laterTextNode!, text: "later answer" });
     fireEvent(document, new Event("selectionchange"));
     await flushSelectionFrames();
-    await screen.findByRole("button", { name: "Include context" });
+    await screen.findByRole("button", { name: "Reply" });
 
     const earlierTextNode = screen.getByText(
       "Select this earlier answer.",
@@ -877,7 +877,7 @@ describe("ThreadTimelineRows actions", () => {
     mockWindowSelection({ node: earlierTextNode!, text: "earlier answer" });
     fireEvent(document, new Event("selectionchange"));
     await flushSelectionFrames();
-    fireEvent.click(await screen.findByRole("button", { name: "Include context" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Reply" }));
 
     expect(onSelectionAddToChat).toHaveBeenLastCalledWith(
       "earlier answer",
@@ -922,7 +922,7 @@ describe("ThreadTimelineRows actions", () => {
     });
 
     const addToChat = await screen.findByRole("button", {
-      name: "Include context",
+      name: "Reply",
     });
     fireEvent.click(addToChat);
     expect(onSelectionAddToChat).toHaveBeenCalledWith(
@@ -966,8 +966,49 @@ describe("ThreadTimelineRows actions", () => {
     fireEvent(document, new Event("selectionchange"));
 
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Include context" })).toBeTruthy(),
+      expect(screen.getByRole("button", { name: "Reply" })).toBeTruthy(),
     );
+  });
+
+  it("forks from the selected assistant message", async () => {
+    mockSelectionMenuMedia({ isCompactViewport: false });
+    const onForkMessage = vi.fn();
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      callback(performance.now());
+      return 1;
+    });
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+
+    renderWithRouter(
+      <ThreadTimelineRows
+        timelineRows={[
+          conversationRow({
+            role: "assistant",
+            text: "Fork from this highlighted answer.",
+            sourceSeqEnd: 7,
+          }),
+        ]}
+        threadRuntimeDisplayStatus="idle"
+        canSpawnChild
+        onForkMessage={onForkMessage}
+        workspaceRootPath={undefined}
+      />,
+    );
+    const textNode = screen.getByText(
+      "Fork from this highlighted answer.",
+    ).firstChild;
+    expect(textNode).not.toBeNull();
+    mockWindowSelection({ node: textNode!, text: "highlighted answer" });
+
+    fireEvent(document, new Event("selectionchange"));
+
+    fireEvent.click(
+      await waitFor(() => screen.getByRole("button", { name: "Fork" })),
+    );
+    expect(onForkMessage).toHaveBeenCalledWith({
+      sourceSeqEnd: 7,
+      context: { text: "highlighted answer", messageNumber: 1 },
+    });
   });
 
   it("ignores thread-search scroll state for a different thread", () => {

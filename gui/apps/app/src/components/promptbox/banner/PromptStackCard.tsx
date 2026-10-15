@@ -26,6 +26,7 @@ export interface PromptStackCardProps {
   className?: string;
   rootRef?: Ref<HTMLElement>;
   style?: CSSProperties;
+  onDismiss?: () => void;
 }
 
 export function PromptStackCard({
@@ -34,26 +35,40 @@ export function PromptStackCard({
   className,
   rootRef,
   style,
+  onDismiss,
 }: PromptStackCardProps) {
+  const chrome = cn(BASE_CHROME, onDismiss && "relative", className);
+  const dismissButton = onDismiss && (
+    <button
+      type="button"
+      aria-label="Dismiss"
+      className="absolute right-3 top-2 flex size-6 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:bg-state-hover hover:text-foreground"
+      onClick={onDismiss}
+    >
+      <Icon name="X" className="size-3.5" aria-hidden="true" />
+    </button>
+  );
   if (ariaLabel) {
     return (
       <section
         ref={rootRef}
         aria-label={ariaLabel}
-        className={cn(BASE_CHROME, className)}
+        className={chrome}
         style={style}
       >
         {children}
+        {dismissButton}
       </section>
     );
   }
   return (
     <div
       ref={rootRef as Ref<HTMLDivElement>}
-      className={cn(BASE_CHROME, className)}
+      className={chrome}
       style={style}
     >
       {children}
+      {dismissButton}
     </div>
   );
 }

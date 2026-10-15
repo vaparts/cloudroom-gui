@@ -13,7 +13,7 @@ import { CLOUD_LOCKED_REASON, showCloudSignIn, useCloudLocked } from "@/hooks/us
 import { fetchWithAppSurface } from "@/lib/app-surface";
 import { useIsCompactViewport } from "@cloudroom/shared-ui/hooks/use-compact-viewport";
 import { ProviderRequirementBanner } from "./banner/ProviderRequirementBanner";
-import { CloudGithubCard, CloudQueueCard } from "@/components/CloudQueue";
+import { CloudGithubCard, CloudQueueCard, FreePlanTip } from "@/components/CloudQueue";
 import { CloudBranchPicker } from "./CloudBranchPicker";
 import { Button } from "@cloudroom/shared-ui/button";
 import {
@@ -1851,7 +1851,7 @@ export function NewThreadComposer({
                   localStorage.setItem("cloudroom.executionTarget", "local");
                 }}
               />
-            ) : null,
+            ) : <FreePlanTip />,
             banner:
               executionTarget === "cloud" ? (
                 cloudBlockedReason === null ? null : (

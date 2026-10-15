@@ -31,7 +31,7 @@ const DISCOVERED_MODELS: ModelInfo[] = [
     value: "haiku",
     resolvedModel: "claude-haiku-4-5-20251001",
     displayName: "Haiku",
-    description: "Haiku 4.5",
+    description: "Fastest for quick answers",
   },
 ];
 
@@ -60,6 +60,18 @@ describe("buildClaudeCodeModels", () => {
       "sonnet",
       "haiku",
     ]);
+    expect(result.models.map((model) => model.displayName)).toEqual([
+      "Opus 5.5 (1M)",
+      "Fable 5.1",
+      "Opus 5 (1M)",
+      "Opus 4.8 (1M)",
+      "Opus 4.7 (1M)",
+      "Sonnet 5",
+      "Haiku 4.5",
+    ]);
+    expect(
+      result.selectedOnlyModels.map((model) => model.displayName),
+    ).toEqual(["Opus 5 (1M, alias)", "Sonnet 5 (alias)", "Haiku 4.5 (alias)"]);
     expect(
       [...result.models, ...result.selectedOnlyModels].some(
         (model) => model.model === "claude-mythos-5",

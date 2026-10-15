@@ -778,7 +778,7 @@ Pending names survive app restarts. Setting a name manually cancels automatic na
 
 ### Thread purpose
 
-Hovering a thread's title shows its purpose: 1-2 sentences on its goal and current state, plus a percent done.
+Hovering a thread's title shows its purpose: one short line on its goal and current state, plus a percent done.
 It is written from the first message alongside the name, then rewritten after every reply. It never changes the title.
 Settings → Thread purpose turns it off (`threadPurpose.enabled`, on by default), picks the model
 (`threadPurpose.model`), and sets reasoning effort (`threadPurpose.reasoningEffort`, default medium).

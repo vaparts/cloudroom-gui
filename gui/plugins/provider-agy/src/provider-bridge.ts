@@ -2,7 +2,6 @@ import {
   type ClientTurnRequestId,
   type DeltaPresentation,
   type PromptInput,
-  type ProviderHealthResult,
   type ThreadDelta,
   type ThreadEventTokenUsageBreakdown,
   BRIDGE_JSON_RPC_ERRORS,
@@ -19,25 +18,19 @@ import {
   experimental_withTitle as withTitle,
   initializeParamsSchema,
   modelListParamsSchema,
+  providerInstallationRunParamsSchema,
+  providerInstallationStatusParamsSchema,
   providerMaintenanceParamsSchema,
   runBridgeRequest,
-  sanitizeInheritedChildProcessEnv,
   threadResumeParamsSchema,
   threadStartParamsSchema,
   threadStopParamsSchema,
   turnStartParamsSchema,
   turnSteerParamsSchema,
-  withoutBridgeRuntimeEnv,
 } from "@get-bb/plugin-sdk/provider-bridge";
-import {
-  type ChildProcessWithoutNullStreams,
-  execFile,
-  spawn,
-} from "node:child_process";
-import { existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { delimiter, join } from "node:path";
+import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { createInterface } from "node:readline";
+import { childEnv, findAgy, runAgy } from "./agy-cli.js";
 import {
   instructionsHash,
   recordSent,
@@ -46,8 +39,12 @@ import {
   withInstructions,
 } from "./instructions.js";
 import {
+  agyHealth,
+  agyInstallationRun,
+  agyInstallationStatus,
+} from "./maintenance.js";
+import {
   AGY_DEFAULT_MODEL_ID,
-  AGY_EXECUTABLE_ENV,
   AGY_FALLBACK_CATALOG,
   type AgyCatalogEntry,
   type AgyEffort,
@@ -62,28 +59,6 @@ type OutboundMessage = { jsonrpc: "2.0" } & Record<string, unknown>;
 const io = createBridgeIo<OutboundMessage>();
 
 const INIT_TIMEOUT_MS = 30_000;
-
-function findAgy(): string | null {
-  const pinned = process.env[AGY_EXECUTABLE_ENV];
-  if (pinned && existsSync(pinned)) return pinned;
-  const local = join(homedir(), ".local", "bin", "agy");
-  if (existsSync(local)) return local;
-  for (const dir of (process.env.PATH ?? "").split(delimiter)) {
-    if (dir && existsSync(join(dir, "agy"))) return join(dir, "agy");
-  }
-  return null;
-}
-
-function childEnv(
-  extra: Record<string, string> | undefined,
-): NodeJS.ProcessEnv {
-  return {
-    ...sanitizeInheritedChildProcessEnv({
-      env: withoutBridgeRuntimeEnv(process.env),
-    }),
-    ...(extra ?? {}),
-  };
-}
 
 interface LaunchSettings {
   model: string;
@@ -623,44 +598,6 @@ function invalidParams(id: JsonRpcId, method: string, issues: unknown): void {
   });
 }
 
-function runAgy(args: string[], timeout: number): Promise<string | null> {
-  const executable = findAgy();
-  if (executable === null) return Promise.resolve(null);
-  return new Promise((resolve) => {
-    execFile(
-      executable,
-      args,
-      { timeout, env: childEnv(undefined) },
-      (error, stdout) => {
-        resolve(error ? null : stdout);
-      },
-    );
-  });
-}
-
-async function healthResult(): Promise<ProviderHealthResult> {
-  const installed = findAgy() !== null;
-  const version = installed
-    ? ((await runAgy(["--version"], 10_000))?.trim().split("\n").pop() ?? null)
-    : null;
-  return {
-    supported: true,
-    health: {
-      status: installed ? "ready" : "not_installed",
-      statusMessage: installed
-        ? null
-        : "agy was not found in ~/.local/bin or on PATH",
-      accountEmail: null,
-      planLabel: null,
-      installedVersion: version,
-      minimumSupportedVersion: null,
-      canInstall: false,
-      canUpdate: false,
-      loginCommand: "agy",
-    },
-  } as ProviderHealthResult;
-}
-
 async function listAgyModels() {
   const stdout = await runAgy(["models"], 30_000);
   const parsed = stdout === null ? [] : parseAgyModels(stdout);
@@ -746,7 +683,29 @@ const handlers: Record<string, RequestHandler> = {
         BRIDGE_REQUEST_METHODS.providerHealth,
         parsed.error.issues,
       );
-    io.sendResult(id, await healthResult());
+    io.sendResult(id, await agyHealth());
+  },
+
+  [BRIDGE_REQUEST_METHODS.providerInstallationStatus]: async (id, params) => {
+    const parsed = providerInstallationStatusParamsSchema.safeParse(params);
+    if (!parsed.success)
+      return invalidParams(
+        id,
+        BRIDGE_REQUEST_METHODS.providerInstallationStatus,
+        parsed.error.issues,
+      );
+    io.sendResult(id, await agyInstallationStatus());
+  },
+
+  [BRIDGE_REQUEST_METHODS.providerInstallationRun]: async (id, params) => {
+    const parsed = providerInstallationRunParamsSchema.safeParse(params);
+    if (!parsed.success)
+      return invalidParams(
+        id,
+        BRIDGE_REQUEST_METHODS.providerInstallationRun,
+        parsed.error.issues,
+      );
+    io.sendResult(id, await agyInstallationRun(parsed.data.action));
   },
 
   [BRIDGE_REQUEST_METHODS.threadStart]: async (id, params) => {

@@ -16,7 +16,11 @@ const MODELS = [
 
 const argv = process.argv.slice(2);
 if (argv[0] === "--version") {
-  process.stdout.write("9.9.9-fake\n");
+  process.stdout.write("9.9.9\n");
+  process.exit(0);
+}
+if (argv[0] === "update") {
+  process.stdout.write("Update successful, restart CLI to use\n");
   process.exit(0);
 }
 if (argv[0] === "models") {

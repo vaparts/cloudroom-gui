@@ -376,7 +376,7 @@ describe("maintenance", () => {
     const result = await s.ok("provider/health", { providerId: "agy" });
     expect(result).toMatchObject({
       supported: true,
-      health: { status: "ready", installedVersion: "9.9.9-fake" },
+      health: { status: "ready", installedVersion: "9.9.9" },
     });
   });
 

@@ -22,7 +22,7 @@ export default function plugin(bb: BbPluginApi) {
       planModeCopy:
         "Antigravity will plan without making changes (agy --mode plan).",
     },
-    maintenance: { health: true, usage: false, installation: true },
+    maintenance: { health: true, usage: true, installation: true },
     capabilities: {
       supportsServiceTier: false,
       supportsNativeUserQuestion: false,

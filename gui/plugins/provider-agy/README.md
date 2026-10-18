@@ -45,6 +45,14 @@ for an hour). Install runs the official script
 (`https://antigravity.google/cli/install.sh`); Update runs `agy update`.
 agy also updates itself in the background, so it is often already current.
 
+## Usage limits
+
+Cloudroom shows agy's limits next to Claude Code and Codex. The bridge runs
+`agy -p=/usage`, a local command that calls no model and costs no quota, and
+reports each line as a window: model group (Gemini, or Claude and GPT),
+5-hour or weekly, percent used and reset time. Results are cached for two
+minutes.
+
 ## Terms of use
 
 The plugin only starts Google's own `agy` binary, which signs in with its own
@@ -72,7 +80,7 @@ review them before use: https://antigravity.google/terms
 - `instructionMode: "replace"` is treated as append; agy's own system prompt
   cannot be replaced.
 - Text input only; agy's stream-json input accepts text blocks.
-- No fork, manual compaction or usage limits.
+- No fork or manual compaction.
 - Health reports installation and version only: agy has no auth-status
   command, and `agy models` answers without a sign-in. A missing sign-in
   surfaces as agy's own error when a thread starts.

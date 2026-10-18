@@ -160,18 +160,21 @@ describe("usage", () => {
       {
         label: "Gemini Models (weekly)",
         kind: "weekly",
+        model: "Gemini Models",
         usedPercent: 0,
         resetsAt: "2026-10-25T09:41:37.000Z",
       },
       {
         label: "Gemini Models (5-hour)",
         kind: "five-hour",
+        model: "Gemini Models",
         usedPercent: 1,
         resetsAt: "2026-10-18T23:22:40.000Z",
       },
       {
         label: "Claude and GPT models (5-hour)",
         kind: "five-hour",
+        model: "Claude and GPT models",
         usedPercent: 60,
         resetsAt: null,
       },

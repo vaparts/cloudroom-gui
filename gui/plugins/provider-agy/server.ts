@@ -1,4 +1,5 @@
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import { registerUsageSource } from "./src/usage-source.js";
 import {
   AGY_EFFORTS,
   AGY_EFFORT_LABELS,
@@ -8,6 +9,7 @@ import {
 } from "./src/vocabulary.js";
 
 export default function plugin(bb: BbPluginApi) {
+  registerUsageSource(bb);
   bb.providers.register({
     id: AGY_PROVIDER_ID,
     displayName: "Antigravity",

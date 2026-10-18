@@ -51,7 +51,9 @@ Cloudroom shows agy's limits next to Claude Code and Codex. The bridge runs
 `agy -p=/usage`, a local command that calls no model and costs no quota, and
 reports each line as a window: model group (Gemini, or Claude and GPT),
 5-hour or weekly, percent used and reset time. Results are cached for two
-minutes.
+minutes. The plugin also publishes a usage source (`src/usage-source.ts`, the
+same contract as the Claude Code and Codex plugins), which is how the Provider
+usage card finds agy.
 
 ## Terms of use
 

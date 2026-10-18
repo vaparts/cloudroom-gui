@@ -185,6 +185,7 @@ export function parseAgyUsage(stdout: string): ProviderUsageWindow[] {
     windows.push({
       label: `${group} (${weekly ? "weekly" : "5-hour"})`,
       kind: weekly ? "weekly" : "five-hour",
+      model: group,
       usedPercent: clampPercent(100 - Number(remaining)),
       resetsAt:
         resetsAt !== undefined && !Number.isNaN(Date.parse(resetsAt))

@@ -2,6 +2,47 @@
 
 Also on [cloudroom.dev/changelog](https://www.cloudroom.dev/changelog).
 
+## 108
+
+Cloud subagents with your Mac closed (2026-10-17)
+
+### Changes
+
+- Cloud agents can message, stop, and archive their subagents even while your Mac is closed.
+- Subagents tell their parent why they failed, and long replies come back whole.
+- Adding a machine over SSH works again.
+- Approval cards for Mac commands show the script they run, with Deny as the default.
+- File attachments show a colored type icon and their size.
+- Theme and starting machine stay in sync across windows, and Settings search opens with /.
+- Claude skills accept arguments, pasted secrets lose stray spaces, and Cloud previews get more time to load.
+
+## 107
+
+Loops and multiple Codex accounts (2026-10-16)
+
+### Changes
+
+- Automations are now called Loops, with new Overview and Review tabs.
+- Use several Codex accounts across Local and Cloud threads.
+- Settings → Machines lists every Mac on your account and lets you switch between them.
+- Settings → Accounts shows cleaner account tiles with full usage bars.
+- Cloud /compact shows when it finishes and waits for a sleeping agent to wake up.
+- Turns started by agents or automations now ask you for approvals instead of silently denying them.
+- Double-click to rename on Mac, right-click images to save them, and Linux no longer shows a crash dialog.
+
+## 106
+
+Cloud without GitHub, steadier Mac access (2026-10-15)
+
+### Changes
+
+- Free accounts can start Cloud threads without a GitHub sign-in.
+- Cloud automations with a check script can run as often as every minute.
+- Copying big files to your Mac works on slow connections, and a busy Mac now says "Mac not responding" instead of "Mac unavailable".
+- Cloud agents can read a subagent's full answer with room-cli thread output.
+- Forking a Local thread keeps it Local.
+- File paths in chat no longer jitter when you hover them.
+
 ## 105
 
 Safer archiving and steadier automations (2026-10-15)

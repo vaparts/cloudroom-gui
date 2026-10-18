@@ -606,8 +606,9 @@ for guidance you want every bb thread to receive regardless of provider.
 
 ## Skills
 
-User-level bb skills live under `<dataDir>/skills/<name>/SKILL.md`; for the
-packaged app this is usually `~/.bb/skills`. Project skills live under
+User-level skills live under `~/.cloudroom/skills/<name>/SKILL.md`, shared by
+every Cloudroom instance on the computer. Older versions kept them in
+`<dataDir>/skills`; the server moves them on start. Project skills live under
 `<workspace>/.bb/skills/<name>/SKILL.md` and override same-named user or plugin
 skills. Running plugins contribute another tier: `skills/<name>/SKILL.md`
 files in an installed plugin (relocatable via the manifest's `bb.skills` field)
@@ -735,9 +736,14 @@ client wrote first, so a stale window cannot silently clobber a newer value.
 | `sidebar.visiblePluginPanels`     | Navigation entries shown, or `null` for every entry |
 | `sidebar.navigationProvider`      | Plugin key, `__automatic__`, or `__builtin__`       |
 | `sidebar.threadListProvider`      | Plugin key, `__automatic__`, or `__builtin__`       |
+| `appearance.theme`                | `light`, `dark`, or `system` (default)              |
+| `defaults.startingMachine`        | `cloud` (default) or `last` for the last machine    |
 
 By project (`project`) is the default for `sidebar.organizationMode` when no
 value is saved. Existing server and legacy browser choices are preserved.
+`appearance.theme` and `defaults.startingMachine` also keep a local copy
+(`bb.theme`, `cloudroom.startingMachine`) so each window applies them before the
+server answers; a window's existing local choice moves to the server once.
 
 Read and write them with:
 
@@ -832,27 +838,38 @@ persistently restores undimmed splits.
 The builtin Accounts plugin is always on (ADR 0194). Connect up to 10 Claude
 Code and 10 Codex subscriptions at the top of Settings → Agents → Claude Code
 or Codex. The machine's own CLI login is the first entry and is never copied, so
-the CLI and Cloudroom never refresh the same token. Added Claude accounts
-sign in with `claude setup-token` and keep its one-year token; Codex accounts
-use a device code and refresh before a turn could outlive them. Tokens stay in
-0600 files under `<data-dir>/plugins/accounts/secrets/`.
+the CLI and Cloudroom never refresh the same token.
 
-Every thread, old and new, uses the selected account from its next turn (ADR
-0197). **Use** selects another; nothing switches automatically. A turn that hits
-a subscription limit marks the account "Limit hit". Claude Code receives the
-account as `CLAUDE_CODE_OAUTH_TOKEN` and rebuilds its session silently. Codex
-signs its app server in memory with `chatgptAuthTokens`, so `~/.codex` stays
-untouched; the token never reaches agent shells. The sidebar usage box shows
-each provider's in-use account in a chip; with several accounts, the chip's
-dropdown switches between them.
+Every Local and Cloud thread, old and new, uses the selected account from its
+next turn (ADR 0197). **Use** selects another; nothing switches automatically. A
+turn that hits a subscription limit marks the account "Limit hit". The sidebar
+usage box shows each provider's in-use account in a chip; with several accounts,
+the chip's dropdown switches between them.
 
-Once a Claude account is added, the machine's own login stays listed but can't
-be picked, because Cloud needs a one-year token. **Add Terminal login** adds it as an
-account, labeled with the Mac's email, and selects it. The selected Claude account becomes the Cloud Claude
-login through `POST /api/v1/cloudroom/account/claude/token`. That route also asks
-awake Cloud Claude sessions to sleep once idle, so their next message restarts
-Claude with the new login. Asleep sandboxes are not woken.
-Cloud Codex is not covered yet.
+**Claude Code:** added accounts sign in with `claude setup-token` and keep its
+one-year token in 0600 files under `<data-dir>/plugins/accounts/secrets/`.
+Claude Code receives the account as `CLAUDE_CODE_OAUTH_TOKEN` and rebuilds its
+session silently. Once a Claude account is added, the machine's own login stays
+listed but can't be picked, because Cloud needs a one-year token. **Add Terminal
+login** adds it as an account, labeled with the Mac's email, and selects it. The
+selected Claude account becomes the Cloud Claude login through
+`POST /api/v1/cloudroom/account/claude/token`.
+
+**Codex:** accounts need a Cloudroom sign-in. They sign in with OpenAI's device
+code, and the website keeps them and is the only place that renews them (ADR
+0195). This machine and sandboxes get access tokens only; the machine caches
+them in `<data-dir>/cloudroom-codex-accounts.json` (0600), so Local threads keep
+working while the website is unreachable. Local Codex signs its app server in
+memory with `chatgptAuthTokens`, so `~/.codex` stays untouched and the token
+never reaches agent shells. Sandboxes get the selected account as
+`~/.codex/auth.json` without its refresh token, and it is never saved back over
+the Mac's own login. "This Mac" stays selectable: Cloud then uses the copy of
+the Mac's login, as before. Codex accounts that older versions kept on the Mac sign in again.
+
+After a switch, awake Cloud sessions of that agent sleep once idle, so their
+next message restarts them with the new login. Awake sandboxes get a new Codex
+login at once, and Core sends "keep working" to threads a usage limit stopped
+(ADR 0117). Asleep sandboxes are not woken.
 
 ## bb connect
 

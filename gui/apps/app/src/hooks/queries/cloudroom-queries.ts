@@ -34,8 +34,6 @@ export const cloudroomStatusSchema = z.object({
   queue_reorder: z.boolean().default(false),
   /** The account's place in the cloud queue, or a blocked region: new Cloud threads wait (docs/scopes/public-launch.md). */
   cloudQueue: z.object({ position: z.number(), total: z.number(), regionBlocked: z.boolean() }).nullable().default(null),
-  /** Free Cloud needs a GitHub sign-in at least 30 days old: new Cloud threads wait for it. */
-  githubRequired: z.boolean().default(false),
   harnesses: z.array(z.object({
     id: z.string(),
     provider: z.string().nullable().optional(),

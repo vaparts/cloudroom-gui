@@ -53,21 +53,6 @@ export function CloudQueueCard({ queue, onUseLocal }: { queue: CloudQueue; onUse
   );
 }
 
-/** Free Cloud needs a GitHub sign-in at least 30 days old. "Sign in with GitHub" adds GitHub to this account on the
- *  website; the card goes away once the website counts it. */
-export function CloudGithubCard({ className }: { className?: string }) {
-  return (
-    <section aria-label="Sign in with GitHub" className={cn("rounded-lg border border-border bg-surface-raised-solid p-3 text-xs", className)}>
-      <div className="flex items-center gap-3">
-        <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border"><Icon name="GithubLogo" className="size-4" aria-hidden /></span>
-        <p className="min-w-0 flex-1 text-sm font-medium">Sign in with GitHub to use free Cloud</p>
-        <Button type="button" size="sm" variant="outline" onClick={upgrade}>Upgrade</Button>
-        <Button type="button" size="sm" onClick={() => openUrlInExternalBrowser("https://www.cloudroom.dev/github")}><Icon name="GithubLogo" aria-hidden />Sign in with GitHub</Button>
-      </div>
-    </section>
-  );
-}
-
 export function FreePlanCard() {
   const usage = useCloudroomAccount().data?.planUsage ?? null;
   if (!usage) return null;

@@ -53,7 +53,6 @@ const USAGE_LIMIT = "cloud_usage_limit";
 const AGENT_LIMIT = "cloud_agent_limit";
 const CLOUD_QUEUE = "cloud_queue";
 const CLOUD_REGION = "cloud_region";
-const NEEDS_GITHUB = "github_account_required";
 // The Mac's skills and global instructions that sandboxes receive, one way (docs/scopes/sandboxes.md).
 const SKILL_ROOTS = [".agents/skills", ".claude/skills", ".codex/skills", ".pi/agent/skills"];
 const INSTRUCTION_FILES = [".claude/CLAUDE.md", ".codex/AGENTS.md", ".pi/agent/AGENTS.md", ".config/opencode/AGENTS.md"];
@@ -220,7 +219,10 @@ export async function macCursorLogin(): Promise<string | null> {
   return login(accessToken, refreshToken);
 }
 
-const output = (command: string, args: string[]) => promisify(execFile)(command, args, { timeout: 10_000 }).then(result => result.stdout.trim(), () => "");
+/** "" on any failure, including spawn errors execFile throws instead of rejecting (an Intel binary without Rosetta). */
+const output = async (command: string, args: string[]) => {
+  try { return (await promisify(execFile)(command, args, { timeout: 10_000 })).stdout.trim(); } catch { return ""; }
+};
 export const githubAccountSchema = z.object({ login: z.string(), name: z.string().nullable(), avatarUrl: z.string().nullable() });
 export type GithubAccount = z.infer<typeof githubAccountSchema>;
 /** This Mac's GitHub CLI token, or "" when `gh` is missing or signed out. */
@@ -373,8 +375,8 @@ export class SandboxDirectory {
       if (response.status === 409 && /busy/i.test(message)) throw new CloudroomConnectionError(message);
       const code = typeof value.code === "string" ? value.code : null;
       if (code === USAGE_LIMIT) this.limit = { on: true, at: Date.now() };
-      // Refused for the cloud queue, the region, or a missing GitHub sign-in: ask again soon, so the composer shows the right card.
-      if (code === CLOUD_QUEUE || code === CLOUD_REGION || code === NEEDS_GITHUB) this.mode = null;
+      // Refused for the cloud queue or the region: ask again soon, so the composer shows the right card.
+      if (code === CLOUD_QUEUE || code === CLOUD_REGION) this.mode = null;
       throw new CloudroomError(message, response.status >= 500 ? null : response.status, code);
     }
     return value;
@@ -527,9 +529,8 @@ export class SandboxDirectory {
     const value = z.object({
       sandboxes: z.boolean(), limited: z.boolean().default(false), small_disk: z.boolean().default(false),
       queue: z.object({ position: z.number(), total: z.number() }).nullable().default(null), region_blocked: z.boolean().default(false),
-      github_required: z.boolean().default(false), plan: z.string().nullable().default(null),
+      plan: z.string().nullable().default(null),
     }).parse(await this.call({ action: "mode" }));
-    this.github = value.github_required;
     this.plan = value.plan;
     this.mode = { on: value.sandboxes, at: Date.now() };
     this.limit = { on: value.limited, at: Date.now() };
@@ -542,10 +543,6 @@ export class SandboxDirectory {
   /** The account's place in the cloud queue, or a blocked region: new Cloud threads wait (docs/scopes/public-launch.md).
    *  Null when it may start them. Refreshed with forNewThreads(). */
   cloudQueue(): CloudQueue | null { return this.queue; }
-
-  private github = false;
-  /** Free Cloud needs a GitHub sign-in at least 30 days old; until then new Cloud threads wait. Refreshed with forNewThreads(). */
-  githubRequired(): boolean { return this.github; }
 
   private readonly capped = new Set<string>();
   /** Whether this new thread was refused for its plan's launch cap; cleared when it starts. */
@@ -610,7 +607,6 @@ export class SandboxDirectory {
     this.uploaded.clear();
     this.mode = null;
     this.limit = null;
-    this.github = false;
     this.plan = null;
     this.usage = null;
     this.capped.clear();
@@ -627,8 +623,9 @@ export class SandboxDirectory {
   forget(thread: string): void { this.views.delete(thread); this.awake.delete(thread); }
   coolingDown(thread: string | null): boolean { return Boolean(thread && (this.backoff.get(thread)?.until ?? 0) > Date.now()); }
 
-  /** Saves a thread's title, project name, harness, model, and Core session ID on the website (ADR 0182, 0239). */
-  async label(thread: string, label: { title: string | null; project_name: string | null; session: string; harness: string; model: string | null }): Promise<void> {
+  /** Saves a thread's title, project name, harness, model, Core session ID, and the thread that started it on the
+   *  website (ADR 0182, 0239, 0256). */
+  async label(thread: string, label: { title: string | null; project_name: string | null; session: string; harness: string; model: string | null; parent: string | null }): Promise<void> {
     await this.call({ action: "label", thread, ...label });
   }
   async archive(thread: string): Promise<void> { this.forget(thread); await this.call({ action: "archive", thread }); }
@@ -650,6 +647,11 @@ export class SandboxDirectory {
     if (this.uploaded.get(name) === digest) return;
     await this.call({ name, value }, "logins", only);
     this.uploaded.set(name, digest);
+  }
+
+  /** The account's Codex accounts, which only the website renews (codex-accounts.ts). */
+  codexAccounts(body: Record<string, unknown>): Promise<unknown> {
+    return this.call(body, "codex-accounts");
   }
 
   /** The account's Cloud environment, shared with the website: variables (names only), repos, and the setup script. */

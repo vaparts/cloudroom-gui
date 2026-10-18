@@ -27,7 +27,7 @@ it("gives each cloud thread its own sandbox, wakes it only for work, and archive
   const { project } = seedProjectWithSource(harness.deps, { hostId: host.id });
   const service = cloudroom(harness.deps);
   const capture = vi.spyOn(harness.deps.telemetry, "capture");
-  const website: { action: string; thread?: string; project?: string; auth?: string; title?: string; project_name?: string; session?: string; harness?: string; model?: string }[] = [];
+  const website: { action: string; thread?: string; project?: string; auth?: string; title?: string; project_name?: string; session?: string; harness?: string; model?: string; parent?: string | null }[] = [];
   const core: { path: string; auth?: string }[] = [];
   let state: "new" | "awake" | "asleep" | "archived" = "new";
   let sandboxThread = "";
@@ -47,11 +47,12 @@ it("gives each cloud thread its own sandbox, wakes it only for work, and archive
   const websiteServer = createServer(async (req, res) => {
     const json = (value: unknown, status = 200) => { res.writeHead(status, { "Content-Type": "application/json" }); res.end(JSON.stringify(value)); };
     const input = await body(req);
-    website.push({ action: input.action ?? input.name, thread: input.thread, project: input.project, auth: req.headers.authorization, title: input.title, project_name: input.project_name, session: input.session, harness: input.harness, model: input.model });
+    website.push({ action: input.action ?? input.name, thread: input.thread, project: input.project, auth: req.headers.authorization, title: input.title, project_name: input.project_name, session: input.session, harness: input.harness, model: input.model, parent: input.parent });
     if (req.url === "/api/desktop/logins") return json({ claude: false, codex: false, pi: false, github: false });
     if (input.action === "awake") return json({ sandboxes: state === "awake" ? [{ thread: sandboxThread, origin: coreUrl, token: "t".repeat(64) }] : [] });
     if (input.action === "wake") { state = "awake"; sandboxThread = input.thread; }
     if (input.action === "archive") state = "archived";
+    else if (state === "archived") return json({ error: "This thread is archived. Restore it to continue.", code: "sandbox_archived" }, 409);
     const view = { thread: input.thread, state, generation: state === "awake" ? 1 : 0, issue: null };
     return json(state === "awake" ? { ...view, origin: coreUrl, token: "t".repeat(64) } : view);
   });
@@ -75,7 +76,7 @@ it("gives each cloud thread its own sandbox, wakes it only for work, and archive
     expect(website.filter(call => call.thread === thread.id && call.action !== "label").map(call => call.action)).toEqual(["wake"]);
     // Then the website learns the thread's name, project, harness, model, and Core session (ADR 0182, 0239).
     await waitFor(() => website.some(call => call.action === "label"), "thread label");
-    expect(website.filter(call => call.action === "label")).toMatchObject([{ thread: thread.id, title: "Work in your own sandbox", project_name: project.name, session: "cr_one", harness: "codex", model: "test-model" }]);
+    expect(website.filter(call => call.action === "label")).toMatchObject([{ thread: thread.id, title: "Work in your own sandbox", project_name: project.name, session: "cr_one", harness: "codex", model: "test-model", parent: null }]);
     expect((await harness.app.request(`/api/v1/threads/${thread.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: "Renamed" }) })).status).toBeLessThan(300);
     await waitFor(() => website.some(call => call.action === "label" && call.title === "Renamed"), "renamed label");
     expect(website.find(call => call.action === "wake")?.project).toBe(project.id);
@@ -102,9 +103,13 @@ it("gives each cloud thread its own sandbox, wakes it only for work, and archive
     expect(capture).toHaveBeenCalledWith({ name: "user_message_sent", properties: { execution: "cloud_sandbox", is_child_thread: false, message_source: "thread_create", provider: "codex" } });
     expect(capture).toHaveBeenCalledWith({ name: "user_message_sent", properties: { execution: "cloud_sandbox", is_child_thread: false, message_source: "thread_send", provider: "codex" } });
 
-    // Archive goes to the website, which stops the sandbox even mid-task.
+    // Archive goes to the website, which stops the sandbox even mid-task, so the thread stops showing as running.
+    await waitFor(() => getThread(harness.deps.db, thread.id)?.status === "active", "running follow-up");
     expect((await harness.app.request(`/api/v1/threads/${thread.id}/archive-all`, { method: "POST" })).status).toBeLessThan(300);
     await waitFor(() => website.some(call => call.action === "archive" && call.thread === thread.id), "archive");
+    expect(getThread(harness.deps.db, thread.id)?.status).toBe("idle");
+    // Stopping it afterwards has nothing to do.
+    expect((await request(`/threads/${thread.id}/stop`, {})).status).toBe(200);
   } finally {
     service.stop();
     coreServer.close(); websiteServer.close();

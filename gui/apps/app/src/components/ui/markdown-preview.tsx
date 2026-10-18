@@ -820,10 +820,14 @@ function MarkdownInlineCode({
   ...props
 }: ComponentPropsWithoutRef<"code"> & { codeText: string }) {
   const { copied, copy } = useClipboardCopy({ text: codeText });
+  const [iconMovesCode, setIconMovesCode] = useState(false);
   return (
     <code
       {...props}
       className="group/code cursor-pointer rounded bg-muted/70 px-1.5 py-0.5 font-mono text-xs hover:bg-muted"
+      onMouseEnter={(event) =>
+        setIconMovesCode(showingIconMovesCode(event.currentTarget))
+      }
       onClick={(event) => {
         // Links keep their own click, and drag-selecting part of the code still works.
         if (
@@ -841,13 +845,29 @@ function MarkdownInlineCode({
         aria-hidden
         className={cn(
           "ml-1 size-3 align-[-0.125em] in-[a]:hidden",
-          copied
-            ? "inline text-success"
-            : "hidden text-muted-foreground group-hover/code:inline",
+          iconMovesCode
+            ? "hidden"
+            : copied
+              ? "inline text-success"
+              : "hidden text-muted-foreground group-hover/code:inline",
         )}
       />
     </code>
   );
+}
+
+function showingIconMovesCode(code: HTMLElement): boolean {
+  const icon = code.querySelector<SVGElement>(":scope > [data-icon]");
+  if (icon === null) {
+    return false;
+  }
+  const top = () => code.getClientRects()[0]?.top ?? 0;
+  icon.style.display = "none";
+  const hiddenTop = top();
+  icon.style.display = "inline";
+  const shownTop = top();
+  icon.style.display = "";
+  return Math.abs(shownTop - hiddenTop) > 1;
 }
 
 function MarkdownPre({ children }: MarkdownPreProps) {

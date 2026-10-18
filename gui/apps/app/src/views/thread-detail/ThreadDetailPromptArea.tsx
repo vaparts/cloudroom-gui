@@ -24,7 +24,6 @@ import type { IconName } from "@cloudroom/shared-ui/icon";
 import { Button } from "@cloudroom/shared-ui/button";
 import { PromptStackCard } from "@/components/promptbox/banner/PromptStackCard";
 import { CloudDiskFullNotice, CloudUsageLimitNotice } from "@/components/CloudUsageLimitNotice";
-import { CloudGithubCard } from "@/components/CloudQueue";
 import type { PromptMentionLinkResolver } from "@/components/promptbox/editor/prompt-mention-link";
 import {
   getFollowUpPromptPlaceholder,
@@ -2161,9 +2160,7 @@ export function ThreadDetailPromptArea({
       <button type="button" className="underline underline-offset-2 hover:text-foreground disabled:opacity-50" disabled={cloudState.isFetching} onClick={() => void cloudState.refetch()}>Retry</button>
     </div>
   ) : null;
-  // A start refused for a missing GitHub sign-in gets the sign-in card instead of the error (CloudGithubCard).
-  const cloudGithubNotice = isCloud && !shouldHideComposer && cloudState.data?.failedStart && cloudConnection.data?.githubRequired ? <CloudGithubCard /> : null;
-  const cloudNotice = cloudAuthNotice ?? cloudLimitNotice ?? cloudGithubNotice ?? (isCloud && !shouldHideComposer && (cloudError || cloudReconnecting || cloudState.data?.failedStart) ? (<>
+  const cloudNotice = cloudAuthNotice ?? cloudLimitNotice ?? (isCloud && !shouldHideComposer && (cloudError || cloudReconnecting || cloudState.data?.failedStart) ? (<>
     {cloudReconnectingPill}
     {(cloudError || cloudState.data?.failedStart) && !cloudStatusDismissed && <PromptStackCard ariaLabel="Cloud thread status" className="space-y-2 p-3 text-xs" onDismiss={() => setDismissedCloudStatus(cloudStatusKey)}>
       {cloudError && <div role="alert" className="whitespace-pre-wrap break-words pr-6 text-destructive">{cloudError}</div>}

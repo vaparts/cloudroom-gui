@@ -13,7 +13,7 @@ import { CLOUD_LOCKED_REASON, showCloudSignIn, useCloudLocked } from "@/hooks/us
 import { fetchWithAppSurface } from "@/lib/app-surface";
 import { useIsCompactViewport } from "@cloudroom/shared-ui/hooks/use-compact-viewport";
 import { ProviderRequirementBanner } from "./banner/ProviderRequirementBanner";
-import { CloudGithubCard, CloudQueueCard, FreePlanTip } from "@/components/CloudQueue";
+import { CloudQueueCard, FreePlanTip } from "@/components/CloudQueue";
 import { CloudBranchPicker } from "./CloudBranchPicker";
 import { Button } from "@cloudroom/shared-ui/button";
 import {
@@ -444,9 +444,9 @@ export function NewThreadComposer({
   >(
     () =>
       seed?.executionTarget ??
-      startingExecutionTarget(
-        selectionScope === "new-thread" && seed?.environment === undefined,
-      ),
+      (seed?.environment !== undefined
+        ? "local"
+        : startingExecutionTarget(selectionScope === "new-thread")),
   );
   const [cloudPicked, setCloudPicked] = useState(
     seed?.executionTarget === "cloud",
@@ -1542,8 +1542,6 @@ export function NewThreadComposer({
   });
   // The cloud queue (docs/scopes/public-launch.md): the card under the composer explains, and Send waits.
   const cloudQueue = executionTarget === "cloud" ? cloudConnection.data?.cloudQueue ?? null : null;
-  // Free Cloud needs a GitHub sign-in at least 30 days old; the website checks it before the queue.
-  const githubRequired = executionTarget === "cloud" && (cloudConnection.data?.githubRequired ?? false);
   // Shown as a banner too, so an unavailable agent is never a silent greyed-out button.
   const cloudBlockedReason = executionTarget === "cloud" && selectedProviderId === "acp-cursor"
     ? "Cursor isn't available in Cloud. Use Codex or Claude Code."
@@ -1555,7 +1553,7 @@ export function NewThreadComposer({
   const submitDisabledReason =
     executionTarget === "cloud"
       ? (cloudBlockedReason
-          ?? (githubRequired ? "Sign in with GitHub to use free Cloud" : cloudQueue ? (cloudQueue.regionBlocked ? "Cloud isn't available in your region yet" : "You're in the cloud queue")
+          ?? (cloudQueue ? (cloudQueue.regionBlocked ? "Cloud isn't available in your region yet" : "You're in the cloud queue")
           : !selectedThreadModel || isLoadingModels
             ? "Select a model"
             : cloudFiltered && !cloudLevels.includes(reasoningLevel)
@@ -1842,7 +1840,7 @@ export function NewThreadComposer({
                   disabled={locks.environment}
                 />
               ) : null,
-            footer: githubRequired ? <CloudGithubCard className="mt-3" /> : cloudQueue ? (
+            footer: cloudQueue ? (
               <CloudQueueCard
                 queue={cloudQueue}
                 onUseLocal={() => {
@@ -2012,7 +2010,6 @@ export function NewThreadComposer({
       submitDisabledReason,
       cloudBlockedReason,
       cloudQueue,
-      githubRequired,
       machineServerAccessReason,
       setupRequiredProvider,
       environmentSetupRequiredReason,

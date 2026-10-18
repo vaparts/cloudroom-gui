@@ -1,16 +1,16 @@
 ---
 name: automations
-description: "Schedule or manage recurring and one-shot Cloudroom agent or script automations."
+description: "Schedule or manage Cloudroom Loops (formerly Automations): recurring and one-shot agent or script runs, local or cloud, and the Review of what they did."
 ---
 
-# Automations
+# Loops
 
-An automation is a scheduled task. When due it runs in one of two modes:
+Loops are Cloudroom's scheduled tasks. The app called them Automations before; the CLI, IDs, and data still use `automation`. When due, a loop runs in one of two modes:
 
 agent Spawn a thread or re-prompt a target thread with a configured prompt.
 script Run a stored server-side script and capture stdout/stderr/exit.
 
-Use the top-level `room-cli automation` command. The CLI routes it to this plugin.
+Use the top-level `room-cli automation` command; `room-cli loop` is the same command. The CLI routes it to this plugin.
 
 Pass `--project` explicitly for every automation command. Inside a thread, automations are stamped origin `agent` and record the creating thread automatically. Automation-spawned threads cannot create automations.
 
@@ -18,7 +18,7 @@ Personal supports automations with `--project proj_personal`. Use `room-cli proj
 
 Local or cloud:
 
-Automations above run on this Mac, only while it is awake and Cloudroom is running. A cloud automation runs on Cloudroom's servers instead, at most every 15 minutes, even while the Mac is off. It belongs to one existing Cloud thread. Each `--cron` run starts a fresh Cloud thread in its own sandbox with that thread's project, harness, model, and `.env` files; `--same-thread` re-prompts that thread instead. A one-time `--at`/`--in` run re-prompts the thread; `--new-thread` gives it a fresh one. Use cloud when the work should keep going with the laptop closed.
+Automations above run on this Mac, only while it is awake and Cloudroom is running. A cloud automation runs on Cloudroom's servers instead, even while the Mac is off: every minute with a script, else at most every 15 minutes. It belongs to one existing Cloud thread. Each `--cron` run starts a fresh Cloud thread in its own sandbox with that thread's project, harness, model, and `.env` files; `--same-thread` re-prompts that thread instead. A one-time `--at`/`--in` run re-prompts the thread; `--new-thread` gives it a fresh one. Use cloud when the work should keep going with the laptop closed.
 
 A fresh-thread automation saves that thread's settings (project, agent, model, effort, repo, `.env` files) when it is created, so it keeps running after the thread is archived. A same-thread one pauses when its thread is archived.
 
@@ -66,3 +66,12 @@ room-cli automation delete <automationId> --project <id> --yes
 
 For partial updates, mode replacement, execution targets, or damaged records,
 read [references/updates.md](references/updates.md). Every command supports `--json`.
+
+Review:
+
+The Loops panel's Review tab lists what loops did on their own in the last 7 days: the threads they started (a thread the agent archived is done, one it left open needs the user), script output, and failures. Threads a script starts with `room-cli thread spawn` are linked to its run automatically. A loop's agent should archive its thread when all is fine, and leave it open with a short verdict when the user must act.
+
+```bash
+room-cli automation review [--all] [--json]
+room-cli automation review mark <itemId...> [--undo]
+```

@@ -32,6 +32,12 @@ after `git fetch upstream`.
 Clones: `~/projects/cloudroom-gui` and `~/projects/cloudroom-core`, each with
 an `upstream` remote. Skills: read through `gh api`.
 
+The installed provider-agy plugin is built from `~/projects/cloudroom-gui`, so
+the sync never switches branches there. It works in the worktree
+`~/projects/cloudroom-gui-sync` (`git worktree add --detach
+~/projects/cloudroom-gui-sync origin/main` from the main clone, once), starting
+each run with `git fetch origin upstream && git switch --detach origin/main`.
+
 ### 1. Triage
 
 For every pending snapshot, read the commit title (core titles carry release

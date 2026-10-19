@@ -23,6 +23,18 @@ if (argv[0] === "update") {
   process.stdout.write("Update successful, restart CLI to use\n");
   process.exit(0);
 }
+if (argv.length === 1 && argv[0] === "-p=/usage") {
+  process.stdout.write(
+    [
+      "Gemini Models\tWeekly Limit Remaining\t100%\t2026-10-25T09:41:37Z",
+      "Gemini Models\tFive Hour Limit Remaining\t99%\t2026-10-18T23:22:40Z",
+      "Claude and GPT models\tWeekly Limit Remaining\t100%\t2026-10-21T22:54:08Z",
+      "Claude and GPT models\tFive Hour Limit Remaining\t40%\t2026-10-18T23:57:04Z",
+      "",
+    ].join("\n"),
+  );
+  process.exit(0);
+}
 if (argv[0] === "models") {
   process.stdout.write(`Fetching available models...\n${MODELS}\n`);
   process.exit(0);

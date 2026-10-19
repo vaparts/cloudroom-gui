@@ -42,6 +42,7 @@ import {
   agyHealth,
   agyInstallationRun,
   agyInstallationStatus,
+  agyUsage,
 } from "./maintenance.js";
 import {
   AGY_DEFAULT_MODEL_ID,
@@ -684,6 +685,17 @@ const handlers: Record<string, RequestHandler> = {
         parsed.error.issues,
       );
     io.sendResult(id, await agyHealth());
+  },
+
+  [BRIDGE_REQUEST_METHODS.providerUsage]: async (id, params) => {
+    const parsed = providerMaintenanceParamsSchema.safeParse(params);
+    if (!parsed.success)
+      return invalidParams(
+        id,
+        BRIDGE_REQUEST_METHODS.providerUsage,
+        parsed.error.issues,
+      );
+    io.sendResult(id, await agyUsage());
   },
 
   [BRIDGE_REQUEST_METHODS.providerInstallationStatus]: async (id, params) => {

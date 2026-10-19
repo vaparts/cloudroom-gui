@@ -1,4 +1,5 @@
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import { registerUsageSource } from "./src/usage-source.js";
 import {
   AGY_EFFORTS,
   AGY_EFFORT_LABELS,
@@ -8,6 +9,7 @@ import {
 } from "./src/vocabulary.js";
 
 export default function plugin(bb: BbPluginApi) {
+  registerUsageSource(bb);
   bb.providers.register({
     id: AGY_PROVIDER_ID,
     displayName: "Antigravity",
@@ -22,7 +24,7 @@ export default function plugin(bb: BbPluginApi) {
       planModeCopy:
         "Antigravity will plan without making changes (agy --mode plan).",
     },
-    maintenance: { health: true, usage: false, installation: true },
+    maintenance: { health: true, usage: true, installation: true },
     capabilities: {
       supportsServiceTier: false,
       supportsNativeUserQuestion: false,

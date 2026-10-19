@@ -2,6 +2,9 @@ import {
   type ProviderHealthResult,
   type ProviderInstallationRunResult,
   type ProviderInstallationStatus,
+  type ProviderUsageResult,
+  type ProviderUsageWindow,
+  experimental_clampPercent as clampPercent,
   experimental_compareVersions as compareVersions,
   experimental_downloadedInstallerCommand as downloadedInstallerCommand,
   experimental_formatCommand as formatCommand,
@@ -163,4 +166,70 @@ export async function agyInstallationRun(
     command,
     verification: installationVerification(status, action),
   };
+}
+
+const USAGE_TTL_MS = 2 * 60_000;
+
+const USAGE_LINE =
+  /^(.+?)\t(Weekly|Five Hour) Limit Remaining\t(\d+(?:\.\d+)?)%\t(\S+)\s*$/u;
+
+let usageCache: { result: ProviderUsageResult; at: number } | null = null;
+
+export function parseAgyUsage(stdout: string): ProviderUsageWindow[] {
+  const windows: ProviderUsageWindow[] = [];
+  for (const line of stdout.split("\n")) {
+    const match = USAGE_LINE.exec(line);
+    if (match === null) continue;
+    const [, group, span, remaining, resetsAt] = match;
+    const weekly = span === "Weekly";
+    windows.push({
+      label: `${group} (${weekly ? "weekly" : "5-hour"})`,
+      kind: weekly ? "weekly" : "five-hour",
+      model: group,
+      usedPercent: clampPercent(100 - Number(remaining)),
+      resetsAt:
+        resetsAt !== undefined && !Number.isNaN(Date.parse(resetsAt))
+          ? new Date(resetsAt).toISOString()
+          : null,
+    });
+  }
+  return windows;
+}
+
+export async function agyUsage(): Promise<ProviderUsageResult> {
+  if (usageCache !== null && Date.now() - usageCache.at < USAGE_TTL_MS) {
+    return usageCache.result;
+  }
+  let result: ProviderUsageResult;
+  if (findAgy() === null) {
+    result = { supported: true, usage: { status: "not_installed" } };
+  } else {
+    const stdout = await runAgy(["-p=/usage"], 30_000);
+    const windows = stdout === null ? [] : parseAgyUsage(stdout);
+    result =
+      windows.length > 0
+        ? {
+            supported: true,
+            usage: {
+              status: "ok",
+              accountEmail: null,
+              planLabel: null,
+              windows,
+            },
+          }
+        : {
+            supported: true,
+            usage: {
+              status: "error",
+              accountEmail: null,
+              planLabel: null,
+              message:
+                stdout === null
+                  ? "agy /usage failed; run agy in a terminal to check the sign-in"
+                  : "agy /usage returned no limits",
+            },
+          };
+  }
+  usageCache = { result, at: Date.now() };
+  return result;
 }

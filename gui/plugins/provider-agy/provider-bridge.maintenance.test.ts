@@ -6,6 +6,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
   AGY_INSTALL_SCRIPT_URL,
   AGY_UPDATE_MANIFEST_ENV,
+  parseAgyUsage,
 } from "./src/maintenance.js";
 import { AGY_EXECUTABLE_ENV } from "./src/vocabulary.js";
 import { BridgeSession, FAKE_AGY } from "./test/harness.js";
@@ -141,5 +142,61 @@ describe("installation status", () => {
     } finally {
       rmSync(emptyHome, { recursive: true, force: true });
     }
+  });
+});
+
+describe("usage", () => {
+  it("parses agy /usage into used-percent windows", () => {
+    const windows = parseAgyUsage(
+      [
+        "Gemini Models\tWeekly Limit Remaining\t100%\t2026-10-25T09:41:37Z",
+        "Gemini Models\tFive Hour Limit Remaining\t99%\t2026-10-18T23:22:40Z",
+        "Claude and GPT models\tFive Hour Limit Remaining\t40%\tnot-a-date",
+        "garbage line",
+        "",
+      ].join("\n"),
+    );
+    expect(windows).toEqual([
+      {
+        label: "Gemini Models (weekly)",
+        kind: "weekly",
+        model: "Gemini Models",
+        usedPercent: 0,
+        resetsAt: "2026-10-25T09:41:37.000Z",
+      },
+      {
+        label: "Gemini Models (5-hour)",
+        kind: "five-hour",
+        model: "Gemini Models",
+        usedPercent: 1,
+        resetsAt: "2026-10-18T23:22:40.000Z",
+      },
+      {
+        label: "Claude and GPT models (5-hour)",
+        kind: "five-hour",
+        model: "Claude and GPT models",
+        usedPercent: 60,
+        resetsAt: null,
+      },
+    ]);
+  });
+
+  it("answers provider/usage from agy /usage", async () => {
+    const result = await session.ok("provider/usage", { providerId: "agy" });
+    expect(result).toMatchObject({
+      supported: true,
+      usage: { status: "ok", accountEmail: null, planLabel: null },
+    });
+    const windows = (
+      result.usage as { windows: Array<{ label: string; usedPercent: number }> }
+    ).windows;
+    expect(windows.map((window) => [window.label, window.usedPercent])).toEqual(
+      [
+        ["Gemini Models (weekly)", 0],
+        ["Gemini Models (5-hour)", 1],
+        ["Claude and GPT models (weekly)", 0],
+        ["Claude and GPT models (5-hour)", 60],
+      ],
+    );
   });
 });

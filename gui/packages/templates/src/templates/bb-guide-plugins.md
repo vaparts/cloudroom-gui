@@ -36,7 +36,8 @@ and is never copied. Every Local and Cloud thread uses the account in use, and
 added, the machine's own login needs **Add Terminal login** before it can be
 picked. Codex accounts need a Cloudroom sign-in: cloudroom.dev keeps and renews
 them, and this machine gets only access tokens.
-Claude Code receives the account through `CLAUDE_CODE_OAUTH_TOKEN`; Codex signs its
+Claude Code runs on the account's own Claude folder (`CLAUDE_CONFIG_DIR`), with a full
+login and shared history, and Cloud gets its one-year token; Codex signs its
 app server in memory through `chatgptAuthTokens`, so `~/.codex` stays untouched.
 The sidebar usage box's account chip switches accounts. Plugin RPCs:
 `accounts.list`, `accounts.use`, `accounts.move`, `accounts.remove`,
@@ -242,6 +243,13 @@ added/updated/unchanged counts.
                                  Exits 1 when a plugin does not come up on
                                  them (previous instance kept, or degraded
                                  because a service ignored its abort)
+  room-cli plugin safe-mode [on|off]   Show or change safe mode. `on` stops every
+                                 plugin that doesn't ship with Cloudroom
+                                 (official catalog plugins included) without
+                                 changing its enabled setting. `off` restarts
+                                 the ones that were enabled and exits 1 if any
+                                 fail to start. Installs and updates of stopped
+                                 plugins are refused until it is off
   room-cli plugin config <id> [set <key> <value> | unset <key>]
                                  Show or change a plugin's declared settings
   room-cli plugin logs <id> [-n N] [-f]  Print (or follow) a plugin's bb.log output

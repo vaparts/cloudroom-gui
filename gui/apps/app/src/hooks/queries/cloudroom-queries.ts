@@ -43,17 +43,18 @@ export const cloudroomStatusSchema = z.object({
     steer: z.boolean().optional(),
     compact: z.boolean().optional(),
     rewind: z.boolean().optional(),
+    prompt_reasoning: z.boolean().optional(),
   })).nullable().default([]),
 });
 
-const CORE_HARNESS_IDS: Record<string, string> = { "acp-cursor": "cursor", "acp-fx": "fx", "acp-opencode": "opencode", "acp-hermes-agent": "hermes", "acp-devin": "devin" };
+const CORE_HARNESS_IDS: Record<string, string> = { "acp-cursor": "cursor", "acp-fx": "fx", "acp-opencode": "opencode", "acp-hermes-agent": "hermes", "acp-devin": "devin", "acp-openclaw": "openclaw" };
 
 export function cloudHarness(status: z.infer<typeof cloudroomStatusSchema> | undefined, harness: string | undefined) {
   const id = harness === undefined ? undefined : (CORE_HARNESS_IDS[harness] ?? harness);
   return status?.harnesses?.find((item) => item.id === id);
 }
 
-const CLOUD_HARNESS_IDS = new Set(["claude-code", "codex", "pi", "fx", "opencode", "hermes", "devin"]);
+const CLOUD_HARNESS_IDS = new Set(["claude-code", "codex", "pi", "cursor", "fx", "opencode", "hermes", "devin", "openclaw"]);
 export function cloudCanRunHarness(harness: string): boolean {
   return CLOUD_HARNESS_IDS.has(CORE_HARNESS_IDS[harness] ?? harness);
 }
@@ -63,10 +64,9 @@ export function cloudCatalogKnown(status: z.infer<typeof cloudroomStatusSchema> 
   return status?.ready === true && status.harnesses !== null;
 }
 
-const HARNESS_NAMES: Record<string, string> = { "claude-code": "Claude Code", codex: "Codex", pi: "Pi", cursor: "Cursor", fx: "fx", opencode: "opencode", hermes: "Hermes Agent", devin: "Devin" };
+const HARNESS_NAMES: Record<string, string> = { "claude-code": "Claude Code", codex: "Codex", pi: "Pi", cursor: "Cursor", fx: "fx", opencode: "opencode", hermes: "Hermes Agent", devin: "Devin", openclaw: "OpenClaw" };
 export function cloudHarnessNames(status: z.infer<typeof cloudroomStatusSchema> | undefined): string {
-  // Cursor stays off in Cloud (ADR 0161), even where a sandbox still has it.
-  return (status?.harnesses ?? []).filter((item) => item.id !== "cursor").map((item) => HARNESS_NAMES[item.id] ?? item.id).join(", ") || "none";
+  return (status?.harnesses ?? []).map((item) => HARNESS_NAMES[item.id] ?? item.id).join(", ") || "none";
 }
 
 export function cloudServiceTierSupported(status: z.infer<typeof cloudroomStatusSchema> | undefined, harness: string | undefined): boolean {
@@ -227,7 +227,7 @@ export function useOpenCloudFile(threadId: string) {
     mutationFn: (path: string) => sdk.cloudroom.openCloudFile(threadId, path),
     onMutate: () => appToast.loading("Downloading from the cloud"),
     onSuccess: ({ path }, _path, toastId) => appToast.success(`Saved to ${path.replace(/^\/Users\/[^/]+/, "~")}`, { id: toastId }),
-    onError: (error, _path, toastId) => appToast.error("Could not open the cloud file", { id: toastId, description: getMutationErrorMessage({ error, fallbackMessage: "The download failed." }) }),
+    onError: (error, _path, toastId) => appToast.error("Could not save the cloud file", { id: toastId, description: getMutationErrorMessage({ error, fallbackMessage: "The download failed." }) }),
   });
 }
 

@@ -1,6 +1,7 @@
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTVWXYZ23456789";
 const HANDLE_ALPHABET = "abcdefghjkmnpqrstvwxyz23456789";
 const SERVER_CACHE_MS = 15_000;
+const MACHINES_PER_MAC = 20;
 const SEEN_WRITE_INTERVAL_MS = 60_000;
 export const PHONE_CODE_TTL_MS = 10 * 60_000;
 export const SHARE_CODE_TTL_MS = 60_000;
@@ -14,11 +15,14 @@ export interface Server {
   credentialHash: string;
   lastSeenAt: number | null;
   name: string | null;
+  /** Set for a remote host: the Mac it runs threads for. */
+  ownerServerId: string | null;
 }
 
 export interface Session {
   serverId: string;
   target: string | null;
+  userId: string | null;
 }
 
 interface Cached<T> {
@@ -27,6 +31,7 @@ interface Cached<T> {
 }
 
 const servers = new Map<string, Cached<Server | null>>();
+const credentials = new Map<string, Cached<Server | null>>();
 const seenWrites = new Map<string, number>();
 
 function cached<T>(
@@ -84,6 +89,7 @@ interface ServerRow {
   credential_hash: string;
   last_seen_at: number | null;
   name?: string | null;
+  owner_server_id?: string | null;
 }
 
 function toServer(row: ServerRow | null): Server | null {
@@ -95,6 +101,7 @@ function toServer(row: ServerRow | null): Server | null {
         credentialHash: row.credential_hash,
         lastSeenAt: row.last_seen_at,
         name: row.name ?? null,
+        ownerServerId: row.owner_server_id ?? null,
       }
     : null;
 }
@@ -132,13 +139,84 @@ export async function serverByCredential(
   );
 }
 
-/** Every Mac on one Cloudroom account, oldest first. */
+/** A remote host's credential, cached briefly because its daemon sends it on every request. */
+export async function machineByCredential(
+  db: D1Database,
+  credential: string,
+): Promise<Server | null> {
+  if (!credential) return null;
+  const hash = await sha256Hex(credential);
+  return cached(credentials, hash, SERVER_CACHE_MS, async () =>
+    toServer(
+      await db
+        .prepare("SELECT * FROM server WHERE credential_hash = ? AND owner_server_id IS NOT NULL")
+        .bind(hash)
+        .first<ServerRow>(),
+    ),
+  );
+}
+
+export async function serverById(db: D1Database, id: string): Promise<Server | null> {
+  return toServer(
+    await db.prepare("SELECT * FROM server WHERE id = ?").bind(id).first<ServerRow>(),
+  );
+}
+
+/** Every Mac on one Cloudroom account, oldest first. Remote hosts are not Macs you switch to. */
 export async function accountServers(db: D1Database, userId: string): Promise<Server[]> {
   const { results } = await db
-    .prepare("SELECT * FROM server WHERE user_id = ? ORDER BY created_at")
+    .prepare("SELECT * FROM server WHERE user_id = ? AND owner_server_id IS NULL ORDER BY created_at")
     .bind(userId)
     .all<ServerRow>();
   return results.map((row) => toServer(row)!);
+}
+
+/** Adds a remote host for this Mac. Null when the Mac already has the most it may have. */
+export async function createMachine(
+  db: D1Database,
+  owner: Server,
+  name: string | null,
+): Promise<{ id: string; handle: string; credential: string } | null> {
+  const count = await db
+    .prepare("SELECT COUNT(*) AS n FROM server WHERE owner_server_id = ?")
+    .bind(owner.id)
+    .first<{ n: number }>();
+  if ((count?.n ?? 0) >= MACHINES_PER_MAC) return null;
+  const id = crypto.randomUUID();
+  const handle = randomString(HANDLE_ALPHABET, 10);
+  const credential = randomToken();
+  await db
+    .prepare(
+      "INSERT INTO server (id, user_id, install_id, handle, credential_hash, name, owner_server_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(id, owner.userId, `machine:${id}`, handle, await sha256Hex(credential), name, owner.id, Date.now())
+    .run();
+  return { id, handle, credential };
+}
+
+/** Removes a remote host and everything signed in to its shares. Returns its handle, or null if it was not this Mac's. */
+export async function deleteMachine(
+  db: D1Database,
+  ownerId: string,
+  machineId: string,
+): Promise<string | null> {
+  const row = await db
+    .prepare("DELETE FROM server WHERE id = ? AND owner_server_id = ? RETURNING handle, credential_hash")
+    .bind(machineId, ownerId)
+    .first<{ handle: string; credential_hash: string }>();
+  if (!row) return null;
+  servers.delete(row.handle);
+  credentials.delete(row.credential_hash);
+  return row.handle;
+}
+
+/** Which Mac a remote host belongs to, read fresh for each new connection. */
+export async function machineOwner(db: D1Database, machineId: string): Promise<string | null> {
+  const row = await db
+    .prepare("SELECT owner_server_id FROM server WHERE id = ?")
+    .bind(machineId)
+    .first<{ owner_server_id: string | null }>();
+  return row?.owner_server_id ?? null;
 }
 
 export async function setServerName(db: D1Database, serverId: string, name: string): Promise<void> {
@@ -191,6 +269,7 @@ export async function createCode(
   serverId: string,
   target: string | null,
   ttlMs: number,
+  userId: string | null = null,
 ): Promise<{ code: string; expiresAt: number }> {
   const now = Date.now();
   const code = randomString(CODE_ALPHABET, 8);
@@ -199,9 +278,9 @@ export async function createCode(
     db.prepare("DELETE FROM code WHERE expires_at < ?").bind(now),
     db
       .prepare(
-        "INSERT INTO code (code_hash, server_id, target, expires_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO code (code_hash, server_id, target, expires_at, user_id) VALUES (?, ?, ?, ?, ?)",
       )
-      .bind(await sha256Hex(code), serverId, target, expiresAt),
+      .bind(await sha256Hex(code), serverId, target, expiresAt, userId),
   ]);
   return { code, expiresAt };
 }
@@ -224,14 +303,14 @@ export async function consumeCode(
   code: string,
   serverId: string,
   target: string | null,
-): Promise<boolean> {
+): Promise<{ userId: string | null } | null> {
   const row = await db
     .prepare(
-      "DELETE FROM code WHERE code_hash = ? AND server_id = ? AND target IS ? AND expires_at > ? RETURNING server_id",
+      "DELETE FROM code WHERE code_hash = ? AND server_id = ? AND target IS ? AND expires_at > ? RETURNING user_id",
     )
     .bind(await sha256Hex(code), serverId, target, Date.now())
-    .first<{ server_id: string }>();
-  return row !== null;
+    .first<{ user_id: string | null }>();
+  return row ? { userId: row.user_id } : null;
 }
 
 export async function createSession(
@@ -239,6 +318,7 @@ export async function createSession(
   serverId: string,
   target: string | null,
   ttlMs = SESSION_TTL_MS,
+  userId: string | null = null,
 ): Promise<string> {
   const now = Date.now();
   const token = randomToken();
@@ -246,9 +326,9 @@ export async function createSession(
     db.prepare("DELETE FROM session WHERE expires_at < ?").bind(now),
     db
       .prepare(
-        "INSERT INTO session (token_hash, server_id, target, expires_at, created_at) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO session (token_hash, server_id, target, expires_at, created_at, user_id) VALUES (?, ?, ?, ?, ?, ?)",
       )
-      .bind(await sha256Hex(token), serverId, target, now + ttlMs, now),
+      .bind(await sha256Hex(token), serverId, target, now + ttlMs, now, userId),
   ]);
   return token;
 }
@@ -259,11 +339,19 @@ export async function sessionByToken(
 ): Promise<Session | null> {
   const row = await db
     .prepare(
-      "SELECT server_id, target FROM session WHERE token_hash = ? AND expires_at > ?",
+      "SELECT server_id, target, user_id FROM session WHERE token_hash = ? AND expires_at > ?",
     )
     .bind(await sha256Hex(token), Date.now())
-    .first<{ server_id: string; target: string | null }>();
-  return row ? { serverId: row.server_id, target: row.target } : null;
+    .first<{ server_id: string; target: string | null; user_id: string | null }>();
+  return row ? { serverId: row.server_id, target: row.target, userId: row.user_id } : null;
+}
+
+export async function pickServer(db: D1Database, token: string, server: Server): Promise<boolean> {
+  const result = await db
+    .prepare("UPDATE session SET server_id = ? WHERE token_hash = ? AND user_id = ? AND target IS NULL")
+    .bind(server.id, await sha256Hex(token), server.userId)
+    .run();
+  return result.meta.changes === 1;
 }
 
 export async function phoneUser(db: D1Database, token: string): Promise<string | null> {
@@ -276,13 +364,18 @@ export async function phoneUser(db: D1Database, token: string): Promise<string |
   return row?.user_id ?? null;
 }
 
-export async function revokeSessions(
-  db: D1Database,
-  serverId: string,
-): Promise<number> {
+export async function accountHandles(db: D1Database, userId: string): Promise<string[]> {
+  const { results } = await db
+    .prepare("SELECT handle FROM server WHERE user_id = ?")
+    .bind(userId)
+    .all<{ handle: string }>();
+  return results.map((row) => row.handle);
+}
+
+export async function revokeSessions(db: D1Database, server: Server): Promise<number> {
   const result = await db
-    .prepare("DELETE FROM session WHERE server_id = ?")
-    .bind(serverId)
+    .prepare("DELETE FROM session WHERE server_id = ? OR user_id = ?")
+    .bind(server.id, server.userId)
     .run();
   return result.meta.changes;
 }

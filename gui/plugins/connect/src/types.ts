@@ -1,8 +1,4 @@
-export type ConnectStateName =
-  | "disconnected"
-  | "pairing"
-  | "connected"
-  | "reconnecting";
+export type ConnectStateName = "disconnected" | "connected" | "reconnecting";
 
 export interface ShareListing {
   hostId: string;
@@ -18,7 +14,6 @@ export interface TunnelStatus {
   paired: boolean;
   handle: string | null;
   url: string | null;
-  dashboardUrl: string;
   lastError: string | null;
   nextRetryAt: number | null;
   since: number;
@@ -29,14 +24,9 @@ export interface TunnelStatus {
 
 export interface ConnectStatus extends TunnelStatus {
   signedIn: boolean;
-  legacy: { url: string; state: ConnectStateName } | null;
 }
 
-export interface PhoneCode {
-  code: string;
-  expiresAt: number;
-  url: string;
-}
+export const PHONE_SETUP_URL = "https://www.cloudroom.dev/m";
 
 export const CONNECT_REALTIME_CHANNEL = "connect";
 

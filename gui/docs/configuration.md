@@ -288,10 +288,10 @@ with `bb settings general managedBranchPrefix <prefix>`.
 
 Settings → General → Git → Delete archived worktrees after sets how long a
 worktree folder stays after its last thread is archived or deleted: 5 minutes,
-1 hour, 1 day, 7 days, 30 days (default), or never. The branch stays;
+1 hour, 1 day, 7 days, 21 days (default), 30 days, or never. The branch stays;
 uncommitted changes are lost. Changing it restarts the timer for worktrees
 already waiting. Set it with
-`room-cli settings general worktreeRetention <5m|1h|1d|7d|30d|never>`.
+`room-cli settings general worktreeRetention <5m|1h|1d|7d|21d|30d|never>`.
 
 Settings → Providers lists every registered agent provider in picker order.
 Move a provider up or down to change the order and choose the default for new
@@ -483,7 +483,8 @@ Known ACP agents appear when their CLI is installed on the host. bb exposes
 `acp-opencode` when `opencode` is on PATH and can be launched as `opencode acp`,
 `acp-omp` when `omp` (oh-my-pi) is on PATH, `acp-grok` when Grok Build's `grok`
 CLI is on PATH and can be launched as `grok agent stdio`, and
-`acp-hermes-agent` when Hermes' `hermes` CLI is on PATH, and `acp-devin` when
+`acp-hermes-agent` when Hermes' `hermes` CLI is on PATH, `acp-openclaw` when the
+`openclaw` CLI is on PATH (it runs through the host's OpenClaw Gateway), and `acp-devin` when
 Devin's `devin` CLI is on PATH. `acp-cursor` is always listed.
 
 Add your own agent through the ACP providers plugin's `customAgents` setting,
@@ -846,10 +847,16 @@ turn that hits a subscription limit marks the account "Limit hit". The sidebar
 usage box shows each provider's in-use account in a chip; with several accounts,
 the chip's dropdown switches between them.
 
-**Claude Code:** added accounts sign in with `claude setup-token` and keep its
-one-year token in 0600 files under `<data-dir>/plugins/accounts/secrets/`.
-Claude Code receives the account as `CLAUDE_CODE_OAUTH_TOKEN` and rebuilds its
-session silently. Once a Claude account is added, the machine's own login stays
+**Claude Code:** adding an account takes two browser approvals. A full
+`claude auth login` signs in the account's own Claude folder,
+`<data-dir>/plugins/accounts/profiles/<id>/`, and Claude renews it in its own
+Keychain entry. Then `claude setup-token` gives Cloud a one-year token, kept in
+0600 files under `<data-dir>/plugins/accounts/secrets/`. Both must be the same
+organization. Local Claude Code runs with `CLAUDE_CONFIG_DIR` set to the folder,
+so claude.ai connectors load, and rebuilds its session silently on a switch. The
+folder links chat history, settings, skills, and plugins to `~/.claude` and gets
+a copy of the user's MCP servers before each turn. Accounts added before full
+logins keep running on `CLAUDE_CODE_OAUTH_TOKEN` until **Sign in again**. Once a Claude account is added, the machine's own login stays
 listed but can't be picked, because Cloud needs a one-year token. **Add Terminal
 login** adds it as an account, labeled with the Mac's email, and selects it. The
 selected Claude account becomes the Cloud Claude login through
@@ -871,66 +878,33 @@ next message restarts them with the new login. Awake sandboxes get a new Codex
 login at once, and Core sends "keep working" to threads a usage limit stopped
 (ADR 0117). Asleep sandboxes are not woken.
 
-## bb connect
+## Cloudroom Connect
 
-`bb connect --code <code> --server https://<handle>.getbb.app` pairs this bb
-server for browser access at `<handle>.getbb.app` (claim a handle and copy the
-command at https://getbb.app). Remote access is owned by the builtin
-**connect plugin** (`plugins/connect/`): pairing redeems the code and stores
-the durable credential in the plugin's kv storage (in `bb.db`), and the
-plugin's background service holds the connect tunnel — dialing the gate,
-proxying relayed requests to the server's own loopback (which serves the SPA
+Cloudroom Connect opens this Mac's Cloudroom from a phone or another computer at
+`https://<id>.cloudroom.run`, through our relay (`apps/connect/`, ADR 0184). The
+builtin **connect plugin** (`plugins/connect/`) registers this Mac once you are
+signed in to Cloudroom, stores its relay credential in the plugin's kv storage,
+and holds the tunnel in its background service: it proxies relayed requests to
+the server's own loopback and reconnects with capped backoff. There is no
+foreground client and no pairing step.
 
-- `/api` + `/ws`), and reconnecting with capped backoff. The tunnel therefore
-  lives as long as the bb server runs (with the plugin enabled) and
-  re-establishes on restart; there is no foreground client. Pair from a machine
-  without an installed bb via `npx -p bb-app@latest bb connect …`.
-  `bb connect status` shows the connect state and every share's host and URL;
-  `bb connect off` disconnects and clears the pairing. After pairing,
-  `bb connect expose <port>` run from a thread shares that thread environment's
-  enrolled host. Server-host URLs remain
-  `https://<server-label>--<port>.getbb.app`; other machines use
-  `https://<machine-label>--<port>.getbb.app` and proxy directly through the
+- `room-cli connect phone` prints the phone setup link, cloudroom.dev/m.
+  `room-cli connect sign-out-phones` ends every phone session.
+- `room-cli connect expose <port>` run from a thread shares that thread
+  environment's enrolled host. Server-host URLs are
+  `https://<id>--<port>.cloudroom.run`; remote hosts use
+  `https://<machine-id>--<port>.cloudroom.run` and proxy directly through the
   owning daemon. Outside a thread the command defaults to the server host;
-  `--host <name-or-id>` overrides host resolution. Access requires the owner's
-  getbb.app session (not a public link). `bb connect unexpose <port>` and
-  `bb connect shares` use the same host resolution and accept the same
-  `--host` override. Their JSON rows include `hostId`, `hostName`, `port`, and
-  `url`; `shares --json` also includes the resolved `host`. A machine without
-  a live Connect enrollment fails fast with instructions to remove and re-add
-  it in Settings → Machines. Disabling the plugin
-  (`bb plugin disable connect`) cuts off all remote access;
-  `bb plugin enable connect` restores it.
-
-The tunnel client lives in `plugins/connect/`; the CLI command is proxied to
-the plugin, and Settings → Connect drives the plugin's rpc (including shared
-ports).
-
-### Pairing the bb mobile app
-
-The bb mobile app reaches a paired bb through the same connect route. It
-enrolls as a connect **machine** — its own credential on the getbb.app account,
-separate from the server's pairing secret and individually revocable — so
-pairing starts from the bb, not from the phone. Both pairing surfaces sit
-behind the `mobileApp` experiment (Settings → Advanced → Experiments → **Mobile app**, or
-`bb settings experiment mobileApp true`) until the app is generally available;
-the connect plugin reads the experiment from `/system/config` on every call,
-so a toggle applies without a plugin reload:
-
-- Settings → Remote access → **Add mobile device** mints a one-time code and
-  shows it as a QR code plus copyable text with a countdown.
-- `bb connect machine-code` prints the same code, server URL, connect apex,
-  and expiry; `bb connect machine-code --json` returns
-  `{code, serverUrl, apex, expiresAt}` (the QR encodes that JSON).
-
-Scan or type the code in the mobile app. The code lasts 10 minutes and works
-once. The phone then appears in the getbb.app dashboard machine list, where you
-can revoke it; every enrollment takes one of the account's machine slots
-(desktop apps, remote execution machines, and phones all count), so a
-machine-limit error asks you to revoke an unused device first. Both surfaces
-need the experiment on, the bb paired (`bb connect --code …`), and the connect
-plugin enabled; with the experiment off the panel hides the section and
-`bb connect machine-code` exits 1 with a pointer to the toggle.
+  `--host <name-or-id>` overrides host resolution. Only phones and browsers
+  signed in to this Mac can open a share. `unexpose` and `shares` use the same
+  host resolution; their JSON rows include `hostId`, `hostName`, `port`, and
+  `url`, and `shares --json` also includes the resolved `host`.
+- Remote hosts from Settings → Machines get their own relay credential, sent as
+  `x-bb-connect-machine`. The relay forwards their `/internal` and `/api/v1`
+  calls as a machine and refuses host-management changes. Removing the machine
+  revokes the credential.
+- Disabling the plugin (`room-cli plugin disable connect`) cuts off all remote
+  access; `room-cli plugin enable connect` restores it.
 
 ## Message editing
 
@@ -1179,8 +1153,8 @@ name fails the install and asks for `@semver:` or `@ref:`. Local
 path installs register the directory in place and never delete it. Builtin
 plugins use `builtin:<name>` and ship with bb unless removed. Managed
 (`git:`/`npm:`) installs
-refuse plugins whose optional `engines.bb` or `engines.bbPluginSdk` ranges
-do not match the running bb/SDK, or whose `dist/*.meta.json` plugin identity
+refuse plugins whose optional `engines.bbPluginSdk` range does not match the
+running SDK, or whose `dist/*.meta.json` plugin identity
 does not match the package manifest; installing a non-builtin source whose
 derived id collides with a builtin name (automations, connect,
 custom-instructions, inline-vis, secrets, workflows) is also refused.
@@ -1196,8 +1170,8 @@ The same tracking intent drives updates: `bb plugin outdated` checks for
 compatible candidates (and reports blocked incompatible newer releases);
 `bb plugin update <id>` / `bb plugin update --all` applies them. Pinned source
 intent is never widened by update; remove and reinstall to choose a different
-source intent. Dev builds (bb `0.0.0`) do not enforce `engines.bb` and annotate
-that on check results.
+source intent. Cloudroom ignores `engines.bb` (BB's app version); only
+`engines.bbPluginSdk` gates compatibility.
 Update confirmation matches install (full-trust code; `--yes` skips; non-TTY
 refuses without it). Plugins are full-trust code running inside the bb server
 process: they can read all local bb data, including other plugins' secrets.

@@ -5,7 +5,7 @@ import { Miniflare, Response as MiniflareResponse } from "miniflare";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { decodeFrame, encodeFrame, type Frame } from "@cloudroom/tunnel-contract";
 import { OFFLINE_HEADER } from "./pages";
-import { GATE_AUTH_HEADER, PHONE_SESSION_HEADER, SESSION_COOKIE, TUNNEL_SESSION_HEADER, TUNNEL_TARGET_HEADER } from "./protocol-headers";
+import { GATE_AUTH_HEADER, GATE_MACHINE_ID_HEADER, MACHINE_CREDENTIAL_HEADER, PHONE_SESSION_HEADER, SESSION_COOKIE, TUNNEL_SESSION_HEADER, TUNNEL_TARGET_HEADER } from "./protocol-headers";
 import { parseVisitorHost, requestForTunnelDo, safeReturnPath } from "./worker";
 import { sha256Hex } from "./store";
 
@@ -136,7 +136,7 @@ beforeAll(async () => {
     outboundService: (request: unknown) => website(request as Request),
   });
   const db = await mf.getD1Database("DB");
-  const migration = ["0001_init.sql", "0002_server_name.sql"]
+  const migration = ["0001_init.sql", "0002_server_name.sql", "0003_machines.sql", "0004_account_sessions.sql"]
     .map((file) => readFileSync(fileURLToPath(new URL(`../migrations/${file}`, import.meta.url)), "utf8"))
     .join(";\n");
   for (const statement of migration.replace(/--.*$/gm, "").split(";")) {
@@ -220,9 +220,11 @@ describe("Cloudroom Connect relay", () => {
     expect(first.status).toBe(302);
     const hop = first.headers.get("location")!;
     expect(hop).toBe(
-      `https://${handle}.${BASE}/__share?port=3000&return=%2Fpage%3Fx%3D1`,
+      `https://app.${BASE}/__share?mac=${handle}&port=3000&return=%2Fpage%3Fx%3D1`,
     );
-    const ticket = await fetchRelay(hop, { headers: { cookie } });
+    const legacy = (await fetchRelay(hop, { headers: HTML })).headers.get("location")!;
+    expect(legacy).toBe(`https://${handle}.${BASE}/__share?mac=${handle}&port=3000&return=%2Fpage%3Fx%3D1`);
+    const ticket = await fetchRelay(legacy, { headers: { cookie } });
     expect(ticket.status).toBe(302);
     const pair = await fetchRelay(ticket.headers.get("location")!);
     expect(pair.headers.get("location")).toBe("/page?x=1");
@@ -357,6 +359,123 @@ describe("Cloudroom Connect relay", () => {
     expect(unknown.status).toBe(401);
     const garbage = await fetchRelay(`https://${BASE}/api/phone-session`, { headers: { authorization: "Bearer nope" } });
     expect(garbage.status).toBe(401);
+  });
+
+  it("lets a remote host run threads for the Mac and share its own ports", async () => {
+    const asMac = { authorization: `Bearer ${credential}`, "content-type": "application/json" };
+    const added = await fetchRelay(`https://${BASE}/api/machines`, {
+      method: "POST",
+      headers: asMac,
+      body: JSON.stringify({ name: "MacBook Air" }),
+    });
+    expect(added.status).toBe(200);
+    const machine = (await added.json()) as { machineId: string; credential: string; serverUrl: string };
+    expect(machine.serverUrl).toBe(`https://${handle}.${BASE}`);
+    const asMachine = { [MACHINE_CREDENTIAL_HEADER]: machine.credential };
+
+    const notAMac = await fetchRelay(`https://${BASE}/api/phone-code`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${machine.credential}` },
+    });
+    expect(notAMac.status).toBe(401);
+
+    const api = await fetchRelay(`https://${handle}.${BASE}/internal/session/open`, { method: "POST", headers: asMachine });
+    expect(await api.text()).toBe("mac:app:/internal/session/open");
+    expect(seen.at(-1)!.headers[GATE_AUTH_HEADER]).toBe("machine");
+    expect(seen.at(-1)!.headers[GATE_MACHINE_ID_HEADER]).toBe(machine.machineId);
+    expect(seen.at(-1)!.headers[MACHINE_CREDENTIAL_HEADER]).toBeUndefined();
+    const socket = await fetchRelay(`https://${handle}.${BASE}/internal/ws`, {
+      headers: { upgrade: "websocket", ...asMachine },
+    });
+    expect(socket.status).toBe(101);
+    socket.webSocket!.accept();
+    socket.webSocket!.close();
+    const otherMac = await register("fedcba9876543210fedcba9876543210");
+    const elsewhere = await fetchRelay(`${otherMac.serverUrl}/internal/session/open`, { method: "POST", headers: asMachine });
+    expect(elsewhere.status).toBe(403);
+    const manage = await fetchRelay(`https://${handle}.${BASE}/api/v1/hosts/join-codes`, { method: "POST", headers: asMachine });
+    expect(manage.status).toBe(403);
+    expect((await fetchRelay(`https://${handle}.${BASE}/internal/session/open`, { method: "POST" })).status).toBe(404);
+    expect(await (await fetchRelay(`https://${handle}.${BASE}/install.sh`)).text()).toBe("mac:app:/install.sh");
+
+    const labeled = await fetchRelay(`https://${BASE}/api/connect/machine-label`, {
+      method: "POST",
+      headers: { ...asMachine, "content-type": "application/json" },
+      body: JSON.stringify({ desiredName: "MacBook Air" }),
+    });
+    const { label } = (await labeled.json()) as { label: string };
+    const machineTunnel = await fetchRelay(`https://${label}.${BASE}/__tunnel?v=1`, {
+      headers: { upgrade: "websocket", authorization: `Bearer ${machine.credential}` },
+    });
+    expect(machineTunnel.status).toBe(101);
+    serveMac(machineTunnel.webSocket!);
+
+    const cookie = await signInPhone();
+    const share = `https://${label}--5173.${BASE}`;
+    const first = await fetchRelay(`${share}/app`, { headers: HTML });
+    expect(first.headers.get("location")).toBe(
+      `https://app.${BASE}/__share?mac=${handle}&port=5173&machine=${label}&return=%2Fapp`,
+    );
+    const legacy = (await fetchRelay(first.headers.get("location")!, { headers: HTML })).headers.get("location")!;
+    const otherCookie = await signInPhone(otherMac);
+    const stolenHop = await fetchRelay(`${otherMac.serverUrl}/__share?port=5173&machine=${label}`, {
+      headers: { cookie: otherCookie },
+    });
+    expect(stolenHop.status).toBe(404);
+    const ticket = await fetchRelay(legacy, { headers: { cookie } });
+    const shareCookie = cookieFrom(await fetchRelay(ticket.headers.get("location")!));
+    expect(await (await fetchRelay(`${share}/app`, { headers: { cookie: shareCookie } })).text()).toBe("mac:5173:/app");
+    expect((await fetchRelay(`https://${label}.${BASE}/`, { headers: { cookie } })).status).toBe(404);
+
+    const listed = await fetchRelay(`https://${BASE}/api/computers`, { method: "POST", headers: asMac });
+    const { computers } = (await listed.json()) as { computers: { handle: string }[] };
+    expect(computers.map((computer) => computer.handle)).not.toContain(label);
+
+    const revoked = await fetchRelay(`https://${BASE}/api/machines/revoke`, {
+      method: "POST",
+      headers: asMac,
+      body: JSON.stringify({ machineId: machine.machineId }),
+    });
+    expect(revoked.status).toBe(200);
+    const after = await fetchRelay(`https://${handle}.${BASE}/internal/session/open`, { method: "POST", headers: asMachine });
+    expect(after.status).toBe(403);
+    machineTunnel.webSocket!.close();
+  });
+
+  it("signs phones in with the account only from the website, keeps them to its Macs, and signs them all out", async () => {
+    const app = `https://app.${BASE}`;
+    const signIn = (origin?: string) => fetchRelay(`${app}/__signin`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", ...(origin ? { origin } : {}) },
+      body: new URLSearchParams({ token: "a.b.c" }).toString(),
+    });
+    website = () => MiniflareResponse.json({ userId: "user-1" });
+    expect((await signIn()).headers.get("set-cookie")).toBeNull();
+    expect((await signIn("https://evil.test")).headers.get("set-cookie")).toBeNull();
+    const cookie = cookieFrom(await signIn("https://website.test"));
+
+    website = () => MiniflareResponse.json({ userId: "user-2" });
+    const stranger = await register("33333333333333333333333333333333");
+    website = () => MiniflareResponse.json({ userId: "user-1" });
+    const pick = await fetchRelay(`${app}/__mac`, {
+      method: "POST",
+      headers: { cookie, origin: app, "content-type": "application/json" },
+      body: JSON.stringify({ handle: stranger.handle }),
+    });
+    expect(pick.status).toBe(404);
+    expect((await fetchRelay(`${app}/__share?mac=${stranger.handle}&port=3000`, { headers: { cookie } })).status).toBe(404);
+
+    const ticket = await fetchRelay(`${app}/__share?mac=${handle}&port=3000&return=%2F`, { headers: { cookie } });
+    const shareCookie = cookieFrom(await fetchRelay(ticket.headers.get("location")!));
+    const share = `https://${handle}--3000.${BASE}/`;
+    expect((await fetchRelay(share, { headers: { cookie: shareCookie } })).status).toBe(200);
+    const revoke = await fetchRelay(`https://${BASE}/api/phone-sessions/revoke`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${credential}` },
+    });
+    expect(revoke.status).toBe(200);
+    expect((await fetchRelay(share, { headers: { cookie: shareCookie } })).status).toBe(401);
+    expect((await fetchRelay(`${app}/`, { headers: { ...HTML, cookie } })).headers.get("location")).toBe("https://website.test/m");
   });
 
   it("shows the offline page when the Mac is not connected", async () => {

@@ -1,20 +1,20 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
-import { access, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { access, mkdir, readdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { promisify } from "node:util";
 import { gzipSync } from "node:zlib";
 import type { HostDaemonContributedEnvEntry } from "@cloudroom/host-daemon-contract";
 import { findCliExecutable } from "@cloudroom/process-utils";
-import { rawThreadIdSchema } from "@cloudroom/domain";
+import { rawThreadIdSchema, reasoningLevelSchema } from "@cloudroom/domain";
 import matter from "gray-matter";
 import { z } from "zod";
 import { hasSupportedFrontmatterDelimiter } from "../skills/injected-skills.js";
 import { macClaudeSignedIn } from "./claude-token.js";
 import { CloudroomConnectionError, CloudroomError } from "./client.js";
 import { macHarnessVersions } from "./harness-versions.js";
-import { isRemoteMcp, mcpSignInKey, needsMcpSignIn, type McpSignIn, type RemoteMcpServer } from "./mcp-login.js";
+import { cancelMcpSignIns, isRemoteMcp, mcpSignInKey, needsMcpSignIn, type McpSignIn, type RemoteMcpServer } from "./mcp-login.js";
 
 export const SANDBOX_PREFIX = "sandbox:";
 export const sandboxThread = (coreUrl: string) => coreUrl.startsWith(SANDBOX_PREFIX) ? coreUrl.slice(SANDBOX_PREFIX.length) : null;
@@ -26,10 +26,10 @@ const viewSchema = z.object({
   startup: z.object({ source: z.enum(["spare", "image", "template", "backup", "resume", "restart", "reuse"]), duration_ms: z.number().nonnegative() }).optional().catch(undefined),
 });
 type View = z.infer<typeof viewSchema>;
-// Threads cloud automations started from the website (ADR 0239): `source` is the automation's own Cloud thread, and
-// `harness`/`model` the run's own agent, for when that thread is gone (ADR 0250).
+// Threads the website started (ADR 0239, 0267): `source` is the automation's own Cloud thread or the thread that
+// launched it, and `harness`/`model`/`reasoning` the thread's own agent (ADR 0250).
 const runSchema = z.object({ thread: rawThreadIdSchema, project: z.string(), title: z.string().nullable(), session: z.string().regex(/^cr_[A-Za-z0-9_-]{1,80}$/), source: z.string(),
-  harness: z.string().nullable().optional().catch(null), model: z.string().nullable().optional().catch(null) });
+  harness: z.string().nullable().optional().catch(null), model: z.string().nullable().optional().catch(null), reasoning: reasoningLevelSchema.nullable().optional().catch(null) });
 export type AutomationRun = z.infer<typeof runSchema>;
 const awakeSchema = z.object({
   sandboxes: z.array(z.object({ thread: z.string(), origin: z.string().url(), token: z.string() })),
@@ -37,18 +37,19 @@ const awakeSchema = z.object({
   recheck_ms: z.number().int().min(1_000).max(3_600_000).catch(60_000),
 });
 export type SandboxAccount = { website: string; userId: string; token: string };
+type AccountRequest = { account: SandboxAccount; signal: AbortSignal };
 export type SandboxConnection = { url: string; token: string };
 export type SandboxTrigger = "app_launch" | "app_activity" | "composer" | "thread_typing" | "thread_view";
 /** Why a sleeping thread wakes before any work is sent: the user opened it or started typing (ADR 0176). */
 export type SandboxWakeTrigger = Extract<SandboxTrigger, "thread_typing" | "thread_view">;
 /** Logins the website keeps for every sandbox of an account (ADR 0145). */
-export type SandboxLogin = "claude" | "codex" | "pi" | "github" | "cursor" | "opencode" | "mcp" | "hermes" | "devin";
+export type SandboxLogin = "claude" | "codex" | "pi" | "github" | "cursor" | "opencode" | "mcp" | "hermes" | "devin" | "openclaw";
 /** GitHub projects also name their repository and cloud folder, so the website can build a template. */
 export type SandboxProject = { id: string; repository: string | null; folder: string };
 const RECHECK_MS = 60_000;
 export type CloudQueue = { position: number; total: number; regionBlocked: boolean };
-/** A Free account's 30-day usage, for the sidebar upgrade card. */
-export type PlanUsage = { agents: number; agentsLimit: number; cpuHours: number | null; cpuHoursLimit: number };
+/** A Free or Pro account's 30-day usage, for the sidebar upgrade card. */
+export type PlanUsage = { plan: "free" | "pro"; agents: number; agentsLimit: number; cpuHours: number | null; cpuHoursLimit: number };
 const USAGE_LIMIT = "cloud_usage_limit";
 const AGENT_LIMIT = "cloud_agent_limit";
 const CLOUD_QUEUE = "cloud_queue";
@@ -202,6 +203,51 @@ export async function macDevinLogin(): Promise<string | null> {
   return credentials.trim() ? JSON.stringify({ credentials }) : null;
 }
 
+/** Claude plans stay on this Mac: Anthropic allows them only in Claude Code, not in OpenClaw (ADR 0265). API keys travel.
+ *  Plan sign-ins, plan tokens (`sk-ant-oat…`, `CLAUDE_CODE_OAUTH_TOKEN`), and `claude-cli` models are all dropped. */
+const claudePlan = (profile: unknown) => {
+  const { provider, type, mode } = (profile ?? {}) as Record<string, unknown>;
+  return (typeof provider === "string" && /^(anthropic|claude)/.test(provider) && (type ?? mode) !== "api_key") || JSON.stringify(profile ?? null).includes("sk-ant-oat");
+};
+const claudePlanEntry = (name: string, value: unknown) => /^claude-cli(\/|$)/.test(name) || (/CLAUDE|ANTHROPIC/i.test(name) && /OAUTH|SESSION|SETUP_TOKEN/i.test(name))
+  || (typeof value === "string" && (/sk-ant-oat/.test(value) || value.startsWith("claude-cli/")));
+function withoutClaudePlans(value: unknown): unknown {
+  if (Array.isArray(value)) return value.filter(item => !claudePlanEntry("", item)).map(withoutClaudePlans);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value).filter(([name, item]) => !claudePlanEntry(name, item) && !claudePlan(item)).map(([name, item]) => [name, withoutClaudePlans(item)]));
+}
+const record = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+const jsonObject = (text: string): Record<string, unknown> => { try { return record(JSON.parse(text)); } catch { return {}; } };
+
+/** This computer's OpenClaw sign-ins and API keys, and its model settings, or null when OpenClaw has none here.
+ *  OpenClaw keeps logins in SQLite, read with macOS's own sqlite3. Memory and persona files stay here, like Hermes'. */
+export async function macOpenclawLogin(): Promise<string | null> {
+  const home = process.env.OPENCLAW_STATE_DIR || join(homedir(), ".openclaw");
+  const query = (file: string, sql: string) => promisify(execFile)("/usr/bin/sqlite3", ["-readonly", join(home, file), sql], { timeout: 10_000 })
+    .then(result => record(jsonObject(result.stdout).profiles), () => ({}));
+  const [shared, agent, configText, envText] = await Promise.all([
+    query("state/openclaw.sqlite", "SELECT value_json FROM config_machine_state WHERE state_key = 'authProfiles.store'"),
+    query("agents/main/agent/openclaw-agent.sqlite", "SELECT store_json FROM auth_profile_store WHERE store_key = 'primary'"),
+    readFile(process.env.OPENCLAW_CONFIG_PATH || join(home, "openclaw.json"), "utf8").catch(() => "{}"),
+    readFile(join(home, ".env"), "utf8").then(withoutComments, () => ""),
+  ]);
+  const profiles = Object.fromEntries(Object.entries({ ...shared, ...agent }).filter(([, profile]) => !claudePlan(profile)));
+  const env = envText.split("\n").filter(line => !claudePlanEntry(line.split("=")[0].replace(/^\s*export\s+/, "").trim(), line.slice(line.indexOf("=") + 1))).join("\n");
+  const mac = jsonObject(configText);
+  const defaults = record(record(mac.agents).defaults);
+  // Only the model, provider, and key settings travel: the Gateway, chat apps, and paths belong to this Mac.
+  const config = record(withoutClaudePlans(Object.fromEntries(Object.entries({
+    agents: { defaults: { model: defaults.model } },
+    models: mac.models,
+    auth: mac.auth,
+    env: mac.env,
+  }).filter(([, value]) => value !== undefined))));
+  const sent = record(record(config.agents).defaults);
+  if (typeof sent.model === "object" && !record(sent.model).primary) delete sent.model;
+  if (!Object.keys(profiles).length && !env.trim() && config.env === undefined && config.models === undefined) return null;
+  return JSON.stringify({ profiles, config, ...(env.trim() ? { env } : {}) });
+}
+
 /** This computer's Cursor CLI login in the file shape the CLI keeps on Linux, or null when Cursor is signed out here.
  *  On macOS the CLI stores it in the Keychain through /usr/bin/security, so reading it the same way shows no macOS prompt. */
 export async function macCursorLogin(): Promise<string | null> {
@@ -217,6 +263,19 @@ export async function macCursorLogin(): Promise<string | null> {
     .then(result => result.stdout.trim(), () => "");
   const [accessToken, refreshToken] = await Promise.all([read("cursor-access-token"), read("cursor-refresh-token")]);
   return login(accessToken, refreshToken);
+}
+
+/** Whether Cursor rejects this API key, checked with this computer's Cursor CLI. A missing CLI or no answer accepts it. */
+export async function cursorKeyRejected(apiKey: string): Promise<boolean> {
+  const binary = findCliExecutable("cursor-agent");
+  if (!binary) return false;
+  try {
+    await promisify(execFile)(binary, ["--disable-auto-update", "--list-models"], { timeout: 30_000, env: { ...process.env, CURSOR_API_KEY: apiKey } });
+    return false;
+  } catch (error) {
+    const { stdout = "", stderr = "" } = error as { stdout?: string; stderr?: string };
+    return /API key is invalid/i.test(`${stdout}${stderr}`);
+  }
 }
 
 /** "" on any failure, including spawn errors execFile throws instead of rejecting (an Intel binary without Rosetta). */
@@ -281,6 +340,30 @@ export async function macSkills(): Promise<MacSkill[]> {
     }
   }
   return [...found.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+async function configFiles(home: string, paths: string[]): Promise<string[]> {
+  const files: string[] = [];
+  for (const path of paths) {
+    const root = await realpath(join(home, path));
+    const ancestors = new Set<string>();
+    const visit = async (path: string): Promise<void> => {
+      const full = join(home, path);
+      const target = await realpath(full).catch(() => null);
+      if (!target || (target !== root && !target.startsWith(root + sep)) || ancestors.has(target)) return;
+      const info = await stat(full);
+      if (!info.isFile() && !info.isDirectory()) return;
+      files.push(path);
+      if (!info.isDirectory()) return;
+      ancestors.add(target);
+      for (const name of await readdir(full)) {
+        if (![".git", "node_modules", ".DS_Store"].includes(name)) await visit(join(path, name));
+      }
+      ancestors.delete(target);
+    };
+    await visit(path);
+  }
+  return files;
 }
 
 export type MacMcpServer = { name: string; server: McpServer | null };
@@ -357,7 +440,7 @@ export class SandboxDirectory {
   constructor(readonly account: () => Promise<SandboxAccount | null>, private readonly woke: (thread: string) => void = () => {}) {}
 
   /** `only` sends the request solely for that account, so a login started under one account never reaches another. */
-  private async call(body: Record<string, unknown>, path = "sandboxes", only?: { account: SandboxAccount; signal: AbortSignal }): Promise<unknown> {
+  private async call(body: Record<string, unknown>, path = "sandboxes", only?: AccountRequest): Promise<unknown> {
     const account = await this.account();
     if (!account) throw new CloudroomError("Sign in to Cloudroom to use cloud sandboxes.");
     if (only && (account.userId !== only.account.userId || account.website !== only.account.website)) throw new CloudroomError("The Cloudroom account changed. Try again.");
@@ -474,6 +557,14 @@ export class SandboxDirectory {
     return this.awake;
   }
 
+  /** Finds threads the website started (Loop runs, top-level launches) even when no known thread sleeps, so none
+   *  stays hidden (ADR 0267). At most one website call per `recheck_ms`; none while signed out. */
+  async discover(): Promise<void> {
+    if (Date.now() < this.awakeNext || this.awakeCheck) return;
+    if (!await this.account()) { this.awakeNext = Date.now() + this.awakeEvery; return; }
+    await this.awakeList();
+  }
+
   /** The thread's Core, or null while it sleeps. `wake` starts it; only callers with work to send pass true. */
   async connection(thread: string, project: SandboxProject, wake: boolean, trigger?: SandboxWakeTrigger): Promise<SandboxConnection | null> {
     let view = this.views.get(thread);
@@ -551,22 +642,23 @@ export class SandboxDirectory {
   private plan: string | null = null;
   private usage: { value: PlanUsage | null; next: number } | null = null;
   private checkingUsage = false;
-  /** A Free account's usage; null for paid plans, in the cloud queue, or before the website answers. Its plan is
+  /** A Free or Pro account's usage; null for other plans, in the cloud queue, or before the website answers. Its plan is
    *  refreshed with forNewThreads(); the usage itself as often as the website says. */
   planUsage(): PlanUsage | null {
-    if (this.plan !== "free" || this.queue) return null;
+    if ((this.plan !== "free" && this.plan !== "pro") || this.queue) return null;
     if (!this.checkingUsage && Date.now() >= (this.usage?.next ?? 0)) {
       this.checkingUsage = true;
       void this.call({ action: "usage" }).then((value) => {
-        const free = z.object({ agents: z.number(), agents_limit: z.number(), cpu_hours: z.number().nullable(), cpu_hours_limit: z.number() }).safeParse(value);
+        const parsed = z.object({ plan: z.enum(["free", "pro"]), agents: z.number(), agents_limit: z.number(), cpu_hours: z.number().nullable(), cpu_hours_limit: z.number() }).safeParse(value);
         const recheck = z.object({ recheck_seconds: z.number().default(600) }).parse(value).recheck_seconds;
         this.usage = {
-          value: free.success ? { agents: free.data.agents, agentsLimit: free.data.agents_limit, cpuHours: free.data.cpu_hours, cpuHoursLimit: free.data.cpu_hours_limit } : null,
+          value: parsed.success ? { plan: parsed.data.plan, agents: parsed.data.agents, agentsLimit: parsed.data.agents_limit, cpuHours: parsed.data.cpu_hours, cpuHoursLimit: parsed.data.cpu_hours_limit } : null,
           next: Date.now() + Math.max(recheck, 60) * 1000,
         };
       }, () => { this.usage = { value: this.usage?.value ?? null, next: Date.now() + RECHECK_MS }; }).finally(() => { this.checkingUsage = false; });
     }
-    return this.usage?.value ?? null;
+    // A plan change shows nothing until the next check, never the old plan's card.
+    return this.usage?.value?.plan === this.plan ? this.usage.value : null;
   }
 
   private small = false;
@@ -598,6 +690,11 @@ export class SandboxDirectory {
 
   /** Forgets what was learned under the last account: sandbox tokens, uploaded logins and config, and its settings. */
   reset(): void {
+    cancelMcpSignIns();
+    this.signIns = null;
+    this.mcpNames = null;
+    this.mcpAt = 0;
+    this.mcpDigest = "";
     this.views.clear();
     this.awake = new Map();
     this.awakeNext = 0;
@@ -629,6 +726,7 @@ export class SandboxDirectory {
     await this.call({ action: "label", thread, ...label });
   }
   async archive(thread: string): Promise<void> { this.forget(thread); await this.call({ action: "archive", thread }); }
+  async refreshCodex(thread: string): Promise<void> { await this.call({ action: "codex", thread }); }
   /** An unarchive right after an archive finds the sandbox busy until the archive ends (up to ~60 s), so keep trying. */
   async restore(thread: string): Promise<void> {
     this.forget(thread);
@@ -642,7 +740,7 @@ export class SandboxDirectory {
   async remove(thread: string): Promise<void> { this.forget(thread); await this.call({ action: "remove", thread }); }
 
   /** Saves a login for every sandbox of this account (ADR 0145), skipping values already uploaded. */
-  async saveLogin(name: SandboxLogin, value: string, only?: { account: SandboxAccount; signal: AbortSignal }): Promise<void> {
+  async saveLogin(name: SandboxLogin, value: string, only?: AccountRequest): Promise<void> {
     const digest = createHash("sha256").update(value).digest("hex");
     if (this.uploaded.get(name) === digest) return;
     await this.call({ name, value }, "logins", only);
@@ -697,9 +795,9 @@ export class SandboxDirectory {
 
   /** The account's cloud MCP sign-ins: Claude Code's `mcpOAuth` records. Read from the website at most every 5 minutes. */
   private signIns: { at: number; value: Promise<Record<string, unknown>> } | null = null;
-  private cloudMcpSignIns(fresh = false): Promise<Record<string, unknown>> {
+  private cloudMcpSignIns(fresh = false, only?: AccountRequest): Promise<Record<string, unknown>> {
     if (fresh || !this.signIns || Date.now() - this.signIns.at > 5 * 60_000) {
-      const value = this.cloudLogin("mcp").then(text => {
+      const value = this.cloudLogin("mcp", only).then(text => {
         const saved = (text ? JSON.parse(text) : null) as { mcpOAuth?: unknown } | null;
         return saved?.mcpOAuth && typeof saved.mcpOAuth === "object" && !Array.isArray(saved.mcpOAuth) ? saved.mcpOAuth as Record<string, unknown> : {};
       });
@@ -720,11 +818,12 @@ export class SandboxDirectory {
     return Object.fromEntries(remote.flatMap(({ name }, i) => states[i] ? [[name, states[i]]] : []));
   }
   /** Adds a new MCP sign-in to the account's others, replacing that server's old one. Awake sandboxes get it at once. */
-  async saveMcpSignIn(name: string, server: RemoteMcpServer, signIn: McpSignIn): Promise<void> {
+  async saveMcpSignIn(name: string, server: RemoteMcpServer, signIn: McpSignIn, account: SandboxAccount): Promise<void> {
+    const only = { account, signal: AbortSignal.timeout(120_000) };
     for (let tries = 1; ; tries++) {
-      const others = Object.entries(await this.cloudMcpSignIns(true)).filter(([, saved]) => (saved as Partial<McpSignIn> | null)?.serverName !== name);
+      const others = Object.entries(await this.cloudMcpSignIns(true, only)).filter(([, saved]) => (saved as Partial<McpSignIn> | null)?.serverName !== name);
       try {
-        return await this.saveLogin("mcp", JSON.stringify({ mcpOAuth: { ...Object.fromEntries(others), [mcpSignInKey(name, server)]: signIn } }));
+        return await this.saveLogin("mcp", JSON.stringify({ mcpOAuth: { ...Object.fromEntries(others), [mcpSignInKey(name, server)]: signIn } }), only);
       } catch (error) {
         // Usually a sandbox saved its refreshed sign-ins first.
         if (tries >= 3) throw error;
@@ -735,7 +834,7 @@ export class SandboxDirectory {
   /** Which logins the website holds for this account's sandboxes. */
   async logins(): Promise<Record<SandboxLogin, boolean>> {
     // Missing names mean an older website that cannot hold that login yet.
-    return z.object({ claude: z.boolean(), codex: z.boolean(), pi: z.boolean(), github: z.boolean(), cursor: z.boolean().default(false), opencode: z.boolean().default(false), mcp: z.boolean().default(false), hermes: z.boolean().default(false), devin: z.boolean().default(false) }).parse(await this.call({ action: "status" }, "logins"));
+    return z.object({ claude: z.boolean(), codex: z.boolean(), pi: z.boolean(), github: z.boolean(), cursor: z.boolean().default(false), opencode: z.boolean().default(false), mcp: z.boolean().default(false), hermes: z.boolean().default(false), devin: z.boolean().default(false), openclaw: z.boolean().default(false) }).parse(await this.call({ action: "status" }, "logins"));
   }
 
   /** Who the account's GitHub login belongs to, or null when GitHub or an older website can't tell. */
@@ -752,6 +851,7 @@ export class SandboxDirectory {
   private copiedAt = 0;
   get loginsCopied(): boolean { return this.copiedAt > 0; }
   /** Copies this Mac's Codex, Pi, opencode, Hermes, Devin, Cursor, and GitHub logins when the user allowed it (ADRs 0128, 0130).
+  /** Copies this Mac's Codex, Pi, opencode, Hermes, OpenClaw, Cursor, and GitHub logins when the user allowed it (ADRs 0128, 0130).
    *  At most once a minute, unless the user just clicked Connect. `github` is false after the user picked another GitHub account. */
   async copyMacLogins(force = false, github = true): Promise<void> {
     if (!force && Date.now() - this.copiedAt < RECHECK_MS) return;
@@ -760,21 +860,22 @@ export class SandboxDirectory {
     const files = [["codex", codexAuthPath()], ["pi", join(piHome, "auth.json")]] as const;
     // One failed login never stops the others; all failures are reported together.
     const failed: string[] = [];
-    const save = (name: "codex" | "pi" | "opencode" | "hermes" | "devin" | "cursor" | "github", value: string) => this.saveLogin(name, value).catch((error: unknown) => { failed.push(`${name}: ${error instanceof Error ? error.message : String(error)}`); });
+    const save = (name: "codex" | "pi" | "opencode" | "hermes" | "devin" | "openclaw" | "cursor" | "github", value: string) => this.saveLogin(name, value).catch((error: unknown) => { failed.push(`${name}: ${error instanceof Error ? error.message : String(error)}`); });
     for (const [name, path] of files) {
       const value = await readFile(path, "utf8").catch(() => null);
       if (!value) continue;
       try { JSON.parse(value); } catch { continue; }
       await save(name, value);
     }
-    const opencode = await macOpencodeLogin();
-    if (opencode) await save("opencode", opencode);
-    const hermes = await macHermesLogin();
-    if (hermes) await save("hermes", hermes);
-    const devin = await macDevinLogin();
-    if (devin) await save("devin", devin);
-    const cursor = await macCursorLogin();
-    if (cursor) await save("cursor", cursor);
+    const copy = async (name: "opencode" | "hermes" | "devin" | "openclaw" | "cursor", read: () => Promise<string | null>) => {
+      const value = await read().catch((error: unknown) => { failed.push(`${name}: ${error instanceof Error ? error.message : String(error)}`); return null; });
+      if (value) await save(name, value);
+    };
+    await copy("opencode", macOpencodeLogin);
+    await copy("hermes", macHermesLogin);
+    await copy("devin", macDevinLogin);
+    await copy("openclaw", macOpenclawLogin);
+    await copy("cursor", macCursorLogin);
     const githubToken = github ? await macGithubToken() : "";
     if (githubToken) await save("github", await sandboxGithubLogin(githubToken));
     if (failed.length) throw new CloudroomError(`Some logins could not be copied to cloud sandboxes. ${failed.join("; ")}`);
@@ -804,8 +905,8 @@ export class SandboxDirectory {
     }
   }
 
-  private async cloudLogin(name: "claude" | "codex" | "mcp"): Promise<string | null> {
-    return z.object({ value: z.string().nullable() }).parse(await this.call({ action: "get", name }, "logins")).value;
+  private async cloudLogin(name: "claude" | "codex" | "mcp", only?: AccountRequest): Promise<string | null> {
+    return z.object({ value: z.string().nullable() }).parse(await this.call({ action: "get", name }, "logins", only)).value;
   }
 
   private configAt = 0;
@@ -831,10 +932,11 @@ export class SandboxDirectory {
     const home = homedir();
     const instructions = (await Promise.all(INSTRUCTION_FILES.map(path => stat(join(home, path)).then(() => path, () => null)))).filter((path): path is string => path !== null);
     const present = [...(await macSkills()).filter(skill => inCloud(skill.name)).flatMap(skill => skill.paths), ...instructions];
-    // Links are followed: sandboxes lack the targets. The digest skips file times, since Claude Code re-saves unchanged skills at every start.
-    // Nothing chosen still uploads an empty archive, so new sandboxes stop getting the old skills.
-    const tar = present.length ? (await promisify(execFile)("tar", ["-c", "-h", "--format", "ustar", "--exclude", ".git", "--exclude", "node_modules", "--exclude", ".DS_Store", "-C", home, ...present],
-      { encoding: "buffer", maxBuffer: 4 * CONFIG_LIMIT, timeout: 30_000, env: { ...process.env, COPYFILE_DISABLE: "1" } })).stdout : Buffer.alloc(1024);
+    const files = await configFiles(home, present);
+    const run = files.length ? promisify(execFile)("tar", ["-c", "-h", "--no-recursion", "--format", "ustar", "-C", home, "--null", "-T", "-"],
+      { encoding: "buffer", maxBuffer: 4 * CONFIG_LIMIT, timeout: 30_000, env: { ...process.env, COPYFILE_DISABLE: "1" } }) : null;
+    run?.child.stdin?.on("error", () => {}).end(files.join("\0") + "\0");
+    const tar = run ? (await run).stdout : Buffer.alloc(1024);
     const digest = contentDigest(tar);
     if (digest === this.configDigest) { this.configIssue = null; return; }
     const body = gzipSync(tar);

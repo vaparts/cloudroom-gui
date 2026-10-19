@@ -114,6 +114,41 @@ async function turn(message) {
     });
     return;
   }
+  if (request.startsWith("denied")) {
+    const index = stepIndex++;
+    const info = {
+      name: "run_command",
+      parameters: { CommandLine: "uname -s" },
+    };
+    step({
+      step_index: index,
+      state: "ACTIVE",
+      step_type: "tool",
+      tool_info: info,
+    });
+    step({
+      step_index: index,
+      state: "DONE",
+      step_type: "tool",
+      tool_info: info,
+    });
+    write({
+      event: "result",
+      result: {
+        conversation_id: conversation,
+        status: "SUCCESS",
+        response: "",
+        num_turns: turns,
+        usage,
+      },
+    });
+    // Real agy prints this on stderr, which can arrive after the result.
+    await sleep(20);
+    process.stderr.write(
+      'jetski: no output produced \u2014 a tool required the "command" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)).\n',
+    );
+    return;
+  }
   if (request.startsWith("tool")) {
     const index = stepIndex++;
     const info = {

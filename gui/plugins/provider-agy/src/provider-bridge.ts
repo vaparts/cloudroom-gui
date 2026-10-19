@@ -116,7 +116,12 @@ interface Turn {
   ordinal: number;
   messages: Map<number, OpenItem>;
   tools: Map<number, OpenItem>;
+  denied: string | null;
 }
+
+// Headless agy denies tools it cannot ask about and says so only on stderr,
+// which can arrive after the result on stdout.
+const DENIAL_GRACE_MS = 300;
 
 interface Session {
   threadId: string;
@@ -372,30 +377,50 @@ function onAgyEvent(session: Session, event: Record<string, unknown>): void {
       },
     ];
     if (result.status === "SUCCESS") {
-      settleTurn(session, "completed", extra);
+      if (result.response !== "") {
+        settleTurn(session, "completed", extra);
+        return;
+      }
+      setTimeout(() => {
+        if (session.turn !== turn) return;
+        if (turn.denied === null) settleTurn(session, "completed", extra);
+        else failTurn(session, turn, extra, turn.denied);
+      }, DENIAL_GRACE_MS);
       return;
     }
-    const message =
+    failTurn(
+      session,
+      turn,
+      extra,
       typeof result.error === "string"
         ? result.error
-        : `agy finished with status ${String(result.status)}`;
-    const key = itemKey(session, turn, 9999, "error");
-    extra.push(
-      {
-        kind: "item.open",
-        key,
-        item: { type: "agentMessage", text: "" },
-        presentation: MESSAGE_PRESENTATION,
-      },
-      {
-        kind: "item.textClose",
-        key,
-        channel: "agentMessage",
-        text: `agy error: ${message}`,
-      },
+        : `agy finished with status ${String(result.status)}`,
     );
-    settleTurn(session, "failed", extra);
   }
+}
+
+function failTurn(
+  session: Session,
+  turn: Turn,
+  extra: ThreadDelta[],
+  message: string,
+): void {
+  const key = itemKey(session, turn, 9999, "error");
+  extra.push(
+    {
+      kind: "item.open",
+      key,
+      item: { type: "agentMessage", text: "" },
+      presentation: MESSAGE_PRESENTATION,
+    },
+    {
+      kind: "item.textClose",
+      key,
+      channel: "agentMessage",
+      text: `agy error: ${message}`,
+    },
+  );
+  settleTurn(session, "failed", extra);
 }
 
 function spawnAgy(
@@ -447,6 +472,8 @@ function spawnAgy(
 
     createInterface({ input: child.stderr }).on("line", (line) => {
       if (line.includes("logging before google.Init")) return;
+      if (line.includes("auto-denied") && session.turn !== null)
+        session.turn.denied = line.replace(/^jetski:\s*/u, "");
       session.stderrTail.push(line);
       if (session.stderrTail.length > 20) session.stderrTail.shift();
     });
@@ -486,6 +513,7 @@ function startTurn(
     ordinal: session.turnCounter,
     messages: new Map(),
     tools: new Map(),
+    denied: null,
   };
   const deltas: ThreadDelta[] = [];
   if (clientRequestId !== undefined)
@@ -529,6 +557,7 @@ async function runQueued(
       ordinal: session.turnCounter,
       messages: new Map(),
       tools: new Map(),
+      denied: null,
     };
     emit(session, [
       { kind: "input.accepted", clientRequestId: queued.clientRequestId },

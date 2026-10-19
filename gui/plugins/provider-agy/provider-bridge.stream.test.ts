@@ -145,6 +145,21 @@ describe("turns", () => {
     ]);
   });
 
+  it("fails the turn with agy's reason when headless agy denies a tool", async () => {
+    const s = session();
+    const providerThreadId = await s.start();
+    await s.turn(providerThreadId, "denied run uname", creq(3));
+    await s.waitForTurns(1);
+
+    expect(turnStatuses(s.pump())).toEqual(["failed"]);
+    expect(completedItems(s.pump()).at(-1)).toMatchObject({
+      type: "agentMessage",
+      text: expect.stringMatching(
+        /^agy error: no output produced .*auto-denied/u,
+      ),
+    });
+  });
+
   it("answers thread/start with agy's own error when agy cannot start", async () => {
     const s = session();
     const response = await s.request("thread/start", {

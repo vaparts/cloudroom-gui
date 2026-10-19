@@ -32,6 +32,8 @@ room-cli thread spawn --project PROJECT --parent-self --provider agy \
 - Messages sent while a turn runs are queued and run as the next turn.
 - Text only: no image input.
 - Local machines only.
+- Subagents are Cloudroom child threads (`room-cli thread spawn
+  --parent-self`), not agy's `/teamwork-preview`, which Cloudroom cannot see.
 
 ## Troubleshooting
 
@@ -40,5 +42,8 @@ room-cli thread spawn --project PROJECT --parent-self --provider agy \
   credentials.
 - **503 "No capacity available for model"**: Google-side capacity. Retry
   later or pick another model.
+- **Turn fails with "auto-denied"**: headless agy refused a tool it could not
+  ask about. Use `--permission-mode full`, or ask the user to add an allow
+  rule such as `command(room-cli)` to `~/.gemini/antigravity-cli/settings.json`.
 - **Not in the picker**: check `room-cli plugin list` for `agy  running` and
   that `agy --version` works on the machine.

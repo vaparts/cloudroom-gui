@@ -77,7 +77,9 @@ review them before use: https://antigravity.google/terms
 
 - No permission prompts: agy's headless mode has none. Tools that need
   approval follow agy's policy (`--mode`, `permissions.allow` in agy's
-  settings) and are otherwise denied.
+  settings) and are otherwise denied. agy reports a denial only on stderr
+  and ends the turn with an empty reply; the bridge turns that into a failed
+  turn that shows agy's reason.
 - No mid-turn steering: messages sent during a turn wait for it to end.
 - `instructionMode: "replace"` is treated as append; agy's own system prompt
   cannot be replaced.
@@ -86,6 +88,22 @@ review them before use: https://antigravity.google/terms
 - Health reports installation and version only: agy has no auth-status
   command, and `agy models` answers without a sign-in. A missing sign-in
   surfaces as agy's own error when a thread starts.
+
+## Subagents
+
+agy threads delegate the Cloudroom way: the agent runs
+`room-cli thread spawn --parent-self ...`, and each subagent is a child thread
+on any provider, visible and stoppable in Cloudroom. The thread environment
+already carries `ROOM_THREAD_ID` and `ROOM_PROJECT_ID`. In `accept-edits`,
+agy denies shell commands it cannot ask about, so allow `room-cli` once in
+`~/.gemini/antigravity-cli/settings.json`:
+
+```json
+{ "permissions": { "allow": ["command(room-cli)"] } }
+```
+
+`full` needs no rule. agy's own background team (`/teamwork-preview`) is not
+shown in Cloudroom: it runs inside the agy process and streams no progress.
 
 ## Install (local path)
 

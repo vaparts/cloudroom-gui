@@ -10,7 +10,8 @@ they are written down.
 
 - Our changes are additive: new plugins, new files and new modules. Edit an
   upstream file only when there is no other way, and record it below.
-- `main` changes only through pull requests. A person merges them.
+- `main` changes only through pull requests. A person approves each merge:
+  the sync agent merges only after an explicit yes in its thread.
 
 ## Upstream files we changed
 
@@ -19,7 +20,13 @@ they are written down.
 | `gui/turbo.json` | `bb-plugin-provider-agy#typecheck` entry | re-add the entry |
 | `gui/pnpm-lock.yaml` | `plugins/provider-agy` importer block | take upstream, re-add only that block, check with `pnpm install --frozen-lockfile` |
 
-## Weekly upstream sync
+## Upstream sync
+
+A script loop runs `fork/upstream-watch.sh` every two hours. It costs no
+tokens: it fetches, and prints nothing unless gui or core has new snapshots
+and no sync PR is open. Then it starts one sync thread with the pending list.
+That thread triages, opens the sync PRs, asks the user, and on a yes merges
+and rebuilds. Skills are triaged along with each run.
 
 Upstream publishes squashed source snapshots ("Publish GUI source for vN",
 "Publish core 0.1.N: ..."), often daily. A snapshot is the unit of review.
@@ -36,7 +43,7 @@ The installed provider-agy plugin is built from `~/projects/cloudroom-gui`, so
 the sync never switches branches there. It works in the worktree
 `~/projects/cloudroom-gui-sync` (`git worktree add --detach
 ~/projects/cloudroom-gui-sync origin/main` from the main clone, once), starting
-each run with `git fetch origin upstream && git switch --detach origin/main`.
+each run with `git fetch --multiple origin upstream && git switch --detach origin/main`.
 
 ### 1. Triage
 
@@ -53,7 +60,7 @@ change into one bucket:
 
 For skills, list added or changed skills and say which could be useful to us.
 
-Open one issue per week in this repo, titled `Upstream triage YYYY-MM-DD`,
+Open one issue per sync run in this repo, titled `Upstream triage YYYY-MM-DD`,
 labelled `upstream-triage`: one section per repo, one line per change, the
 snapshot commit for each, and the sync PRs below.
 
@@ -78,3 +85,31 @@ Checks:
 
 If a check fails, open the PR anyway as a draft, with the failure in the
 description.
+
+If a sync PR for the repo is already open, merge the newer snapshots into its
+branch instead of opening another one.
+
+### 3. Ask
+
+Tell the user in a few lines what matters, the check results, and a
+recommendation. Then wait. Merge nothing without an explicit yes.
+
+### 4. Merge and rebuild
+
+On a yes:
+
+1. Fetch upstream again. If newer snapshots arrived, merge them into the sync
+   branch and rerun the checks; if they matter, report and ask again.
+2. Merge each sync PR with
+   `gh api -X PUT repos/vaparts/<repo>/pulls/<n>/merge -f merge_method=merge`
+   and close the triage issue.
+3. In `~/projects/cloudroom-gui`: if it is not on `main` or has uncommitted
+   changes, stop and report. Otherwise `git pull --ff-only`.
+4. Rebuild the plugin only if the merged range touches
+   `gui/packages/plugin-sdk`, `gui/packages/provider-bridge-protocol`,
+   `gui/plugins/provider-agy` or `gui/pnpm-lock.yaml`. From `gui/`:
+   `pnpm install --frozen-lockfile`,
+   `pnpm exec turbo run build:runtime --filter=@get-bb/plugin-sdk`, then in
+   `plugins/provider-agy`: `room-cli plugin build && room-cli plugin reload provider-agy`.
+   Confirm with `room-cli plugin list` that it is running.
+5. Report in one line and archive the thread.

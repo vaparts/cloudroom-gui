@@ -91,6 +91,19 @@ export async function getProviderUsageLimits(
 
 const LIMITS = "anthropic-ratelimit-unified";
 
+function claudeCreditsInUse(
+  headers: Headers,
+  windows: readonly { usedPercent: number }[],
+): boolean {
+  if (headers.get(`${LIMITS}-overage-in-use`) === "true") return true;
+  const overage = headers.get(`${LIMITS}-overage-status`);
+  return (
+    (overage === "allowed" || overage === "allowed_warning") &&
+    (headers.get(`${LIMITS}-status`) === "rejected" ||
+      windows.some((window) => window.usedPercent >= 100))
+  );
+}
+
 function resetIso(value: string | null): string | null {
   if (!value) return null;
   const numeric = Number(value);
@@ -163,7 +176,14 @@ export async function cloudClaudeUsage(
       ];
     });
     return windows.length
-      ? { status: "ok", ...known, windows }
+      ? {
+          status: "ok",
+          ...known,
+          windows,
+          credits: claudeCreditsInUse(response.headers, windows)
+            ? { detail: null }
+            : null,
+        }
       : {
           status: "error",
           message: `Claude usage request failed (HTTP ${response.status}).`,

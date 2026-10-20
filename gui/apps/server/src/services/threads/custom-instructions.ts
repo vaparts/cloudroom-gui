@@ -91,6 +91,7 @@ export function prepareCustomInstructionInput(
 export function prepareCloudInstructionInput(
   prompt: { text: string; content?: unknown },
   instructions: string,
+  limit: number,
 ): { text: string; content?: unknown } {
   const input: PromptInput[] = [
     { type: "text", text: prompt.text, mentions: [] },
@@ -101,11 +102,11 @@ export function prepareCloudInstructionInput(
     .map((part) => (part.type === "text" ? part.text : ""))
     .join("\n");
   const bytes = Buffer.byteLength(text, "utf8");
-  if (bytes > 32768) {
+  if (bytes > limit) {
     throw new ApiError(
       400,
       "invalid_request",
-      `Message plus custom instructions is too long (${Math.ceil(bytes / 1024)} KB). Cloud messages can be up to 32 KB. Shorten the message or custom instructions.`,
+      `Message plus custom instructions is too long (${Math.ceil(bytes / 1024)} KB). Cloud messages can be up to ${limit / 1024} KB. Shorten the message or custom instructions.`,
     );
   }
   return {

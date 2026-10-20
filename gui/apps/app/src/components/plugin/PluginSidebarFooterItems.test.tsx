@@ -237,8 +237,9 @@ describe("PluginSidebarFooterItems", () => {
   });
 
   it("toggles and dismisses a disclosure accessibly", () => {
+    let footer: { setAlert(message: string | null): void } | undefined;
     const definition = definePluginApp((app) => {
-      app.experimental_sidebarFooter.register({
+      footer = app.experimental_sidebarFooter.register({
         kind: "disclosure",
         id: "usage",
         label: "Provider usage",
@@ -280,6 +281,12 @@ describe("PluginSidebarFooterItems", () => {
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
     expect(document.activeElement).toBe(trigger);
     expect(screen.queryByRole("tooltip")).toBeNull();
+
+    act(() => footer?.setAlert("Claude Code on usage credits"));
+    expect(document.querySelector("[data-footer-alert]")).not.toBeNull();
+    expect(screen.getByText("Claude Code on usage credits")).toBeDefined();
+    act(() => footer?.setAlert(null));
+    expect(document.querySelector("[data-footer-alert]")).toBeNull();
   });
 
   it("keeps the tooltip closed when the More drawer returns focus after a touch dismissal", () => {

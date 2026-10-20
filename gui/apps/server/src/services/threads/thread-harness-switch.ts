@@ -40,7 +40,7 @@ export interface HarnessSwitch {
 }
 
 const HISTORY_FILE = "conversation-history.md";
-// The file stays far below the 25 MB attachment limit; the inline tail stays well inside Cloud's 32 KB message limit.
+// The file stays far below the 25 MB attachment limit; the inline tail stays well inside Cloud's 256 KB message limit.
 const FILE_CHARS = 4_000_000;
 const TAIL_CHARS = 6_000;
 

@@ -33,7 +33,7 @@ import { getGateAuthKind } from "../../request-context.js";
 import { noteActiveMinute, timeInApp } from "./time-in-app.js";
 import { disconnectGithub, githubAccount, githubAuth } from "./github-login.js";
 import { addGithubRepo, repoSuggestions } from "./repo-suggestions.js";
-import { SETUP_ACTIONS, SETUP_AGENTS, SETUP_DETAILS, SETUP_STEPS } from "../system/telemetry.js";
+import { SETUP_ACTIONS, SETUP_AGENTS, SETUP_DETAILS, SETUP_STEPS, UPGRADE_PROMPTS } from "../system/telemetry.js";
 
 const SAFE_SETTINGS_SEARCH = /^(?=.{2,40}$)\p{L}+(?: \p{L}+){0,3}$/u;
 
@@ -164,6 +164,16 @@ export function installCloudroomRoutes(app: Hono, deps: AppDeps): void {
     if (!parsed.success) throw new ApiError(400, "invalid_settings_search", "Invalid settings search.");
     const query = parsed.data.query.trim().toLowerCase().replace(/\s+/g, " ");
     if (SAFE_SETTINGS_SEARCH.test(query)) deps.telemetry.capture({ name: "settings_search_no_results", properties: { query } });
+    return context.json({ ok: true });
+  });
+  const viewedUpgradePrompts = new Set<string>();
+  app.post("/api/v1/cloudroom/upgrade-prompt", async (context) => {
+    const parsed = z.object({ where: z.enum(UPGRADE_PROMPTS), action: z.enum(["viewed", "clicked"]) }).strict().safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) throw new ApiError(400, "invalid_upgrade_prompt", "Invalid upgrade prompt.");
+    if (parsed.data.action === "clicked" || !viewedUpgradePrompts.has(parsed.data.where)) {
+      if (parsed.data.action === "viewed") viewedUpgradePrompts.add(parsed.data.where);
+      deps.telemetry.capture({ name: "upgrade_prompt", properties: parsed.data });
+    }
     return context.json({ ok: true });
   });
   app.post("/api/v1/cloudroom/bug-reports", async (context) => {

@@ -1,3 +1,4 @@
+export { experimental_THREAD_ACTION_GROUPS } from "../../../packages/plugin-sdk/src/thread-action-groups";
 import { pluginSdkAppImplementation } from "../src/lib/plugin-sdk-app-impl";
 
 export type * from "@get-bb/plugin-sdk";

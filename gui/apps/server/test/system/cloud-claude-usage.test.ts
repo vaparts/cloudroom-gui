@@ -55,6 +55,7 @@ describe("cloudClaudeUsage", () => {
       status: "ok",
       accountEmail: null,
       planLabel: "Max",
+      credits: null,
       windows: [
         {
           label: "Current session",
@@ -129,6 +130,7 @@ describe("GET /api/v1/system/usage-limits with a cloud Claude login", () => {
           status: "ok",
           accountEmail: null,
           planLabel: "Max",
+          credits: null,
           windows: [
             {
               label: "Current session",

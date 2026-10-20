@@ -97,7 +97,15 @@ export type TelemetryEvent =
     }
   /** Plugin use counts and which plugins are on; built in services/plugins/plugin-usage-telemetry.ts. */
   | { name: "plugin_usage"; properties: { plugin_id: string; tool: number; cli: number; mention: number; ui: number } }
-  | { name: "plugins_snapshot"; properties: { enabled: string; disabled: string } };
+  | { name: "plugins_snapshot"; properties: { enabled: string; disabled: string } }
+  | {
+      name: "turn_failed";
+      properties: { execution: TelemetryExecution; is_child_thread: boolean; provider: string; error_category: string };
+    }
+  | { name: "upgrade_prompt"; properties: { where: (typeof UPGRADE_PROMPTS)[number]; action: "viewed" | "clicked" } };
+
+export const UPGRADE_PROMPTS = ["limit_notice", "disk_full", "queue", "queue_badge", "plan_card", "free_tip"] as const;
+const PLANS = ["free", "pro", "super", "ultra"];
 
 export type PluginTelemetryProperties = Record<string, TelemetryValue>;
 
@@ -105,6 +113,7 @@ export interface TelemetryService {
   capture(event: TelemetryEvent): void;
   capturePlugin(pluginId: string, name: string, properties: PluginTelemetryProperties): void;
   setEnabled(enabled: boolean): void;
+  setPlanSource(source: () => string | null): void;
 }
 
 interface CreateTelemetryServiceArgs {
@@ -123,6 +132,7 @@ const noopTelemetryService: TelemetryService = {
   capture: () => {},
   capturePlugin: () => {},
   setEnabled: () => {},
+  setPlanSource: () => {},
 };
 
 export function createNoopTelemetryService(): TelemetryService {
@@ -153,6 +163,7 @@ export async function createTelemetryService(
     fileName: TELEMETRY_ID_FILE_NAME,
   });
   let telemetryEnabled = args.telemetryEnabled;
+  let planSource: () => string | null = () => null;
   const commonProperties = {
     app_version: args.appVersion,
     arch: process.arch,
@@ -162,6 +173,7 @@ export async function createTelemetryService(
   const send = (name: string, eventProperties: object): void => {
     if (!telemetryEnabled) return;
     const appSurface = telemetryAppSurfaceStorage.getStore() ?? args.appSurface;
+    const plan = planSource();
     const body = JSON.stringify({
       api_key: args.apiKey,
       distinct_id: distinctId,
@@ -170,6 +182,7 @@ export async function createTelemetryService(
         ...commonProperties,
         ...eventProperties,
         app_surface: appSurface,
+        plan: plan && PLANS.includes(plan) ? plan : null,
       },
       timestamp: new Date().toISOString(),
     });
@@ -187,6 +200,9 @@ export async function createTelemetryService(
   return {
     setEnabled(enabled: boolean): void {
       telemetryEnabled = enabled;
+    },
+    setPlanSource(source): void {
+      planSource = source;
     },
     capturePlugin(pluginId, name, properties): void {
       send(name, { ...properties, plugin_id: pluginId });

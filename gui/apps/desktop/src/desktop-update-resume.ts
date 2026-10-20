@@ -87,8 +87,17 @@ async function waitUntilStopped(serverUrl: string, ids: string[]) {
 // The server reads this on its next start to report whether the install worked (setup-telemetry.ts).
 const ATTEMPT_FILE_NAME = "update-attempt.json";
 
-export async function saveUpdateAttempt(dataDir: string, from: string, to: string): Promise<void> {
-  await writeFile(join(dataDir, ATTEMPT_FILE_NAME), JSON.stringify({ from, to, at: Date.now() }));
+type AttemptNote = Record<string, string | boolean>;
+
+export async function saveUpdateAttempt(dataDir: string, from: string, to: string, note: AttemptNote = {}): Promise<void> {
+  await writeFile(join(dataDir, ATTEMPT_FILE_NAME), JSON.stringify({ from, to, at: Date.now(), ...note }));
+}
+
+/** Adds what happened after "Restart to update" (a quit timeout, an updater error), so a failed install says why. */
+export async function noteUpdateAttempt(dataDir: string, note: AttemptNote): Promise<void> {
+  const file = join(dataDir, ATTEMPT_FILE_NAME);
+  const attempt = JSON.parse(await readFile(file, "utf8")) as object;
+  await writeFile(file, JSON.stringify({ ...attempt, ...note }));
 }
 
 export async function reportDesktopUpdate(

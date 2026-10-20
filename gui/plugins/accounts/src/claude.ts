@@ -163,7 +163,9 @@ export const claudeSecret = (token: string) => ({
 // One-year setup tokens can't read /api/oauth/usage (it needs user:profile),
 // but every Claude reply carries the account's limits in its headers, even a 429.
 // OAuth replies need the Claude Code system prompt, or Anthropic answers 429.
-export async function claudeUsage(secret: Secret): Promise<UsageWindow[]> {
+export async function claudeUsage(
+  secret: Secret,
+): Promise<{ windows: UsageWindow[]; credits: { detail: null } | null }> {
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -201,7 +203,13 @@ export async function claudeUsage(secret: Secret): Promise<UsageWindow[]> {
   });
   if (windows.length === 0)
     throw new Error(`Claude usage failed (HTTP ${response.status}).`);
-  return windows;
+  const overage = response.headers.get(`${LIMITS}-overage-status`);
+  const credits =
+    response.headers.get(`${LIMITS}-overage-in-use`) === "true" ||
+    ((overage === "allowed" || overage === "allowed_warning") &&
+      (response.headers.get(`${LIMITS}-status`) === "rejected" ||
+        windows.some((window) => window.usedPercent >= 100)));
+  return { windows, credits: credits ? { detail: null } : null };
 }
 
 export async function localClaudeEmail(): Promise<string | null> {

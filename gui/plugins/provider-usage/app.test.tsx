@@ -237,7 +237,7 @@ describe("provider usage footer disclosure", () => {
           body: JSON.stringify({
             force: false,
             machineIds: null,
-            maxAgeMs: 30 * 60_000,
+            maxAgeMs: 5 * 60_000,
             providerId: null,
           }),
         }),
@@ -334,7 +334,7 @@ describe("provider usage footer disclosure", () => {
       expect.objectContaining({
         body: JSON.stringify({
           force: false,
-          machineIds: null,
+          machineIds: ["host-m4", "host-m5", "source:account-pool"],
           maxAgeMs: 5 * 60_000,
           providerId: null,
         }),

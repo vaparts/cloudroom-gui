@@ -93,6 +93,9 @@ export const automationRpcContract = defineRpcContract({
 
 type Sdk = Pick<BbPluginApi["sdk"], "cloudroom" | "threads">;
 type Cloud = Sdk["cloudroom"];
+type CloudAutomation = NonNullable<
+  Awaited<ReturnType<Cloud["automations"]>>["automation"]
+>;
 
 async function cloudThreadAgent(
   threads: Sdk["threads"],
@@ -115,14 +118,21 @@ async function cloudThreadAgent(
 
 async function withCloudAgents(threads: Sdk["threads"], result: unknown) {
   const { automations = [] } = result as {
-    automations?: { thread_id: string }[];
+    automations?: Pick<CloudAutomation, "thread_id" | "agent">[];
   };
   return {
     ...(result as object),
+    // A fresh-thread loop's own saved agent; otherwise its thread's, which it uses.
     automations: await Promise.all(
       automations.map(async (automation) => ({
         ...automation,
-        agent: await cloudThreadAgent(threads, automation.thread_id),
+        agent: automation.agent
+          ? {
+              providerId: automation.agent.provider,
+              model: automation.agent.model,
+              reasoningLevel: automation.agent.reasoning,
+            }
+          : await cloudThreadAgent(threads, automation.thread_id),
       })),
     ),
   };

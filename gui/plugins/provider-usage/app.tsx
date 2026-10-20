@@ -57,7 +57,7 @@ export interface UsageStoreSnapshot {
 
 const CARD_MAX_AGE_MS = 2 * 60_000;
 const FOCUS_MAX_AGE_MS = 5 * 60_000;
-const SAFETY_REFRESH_INTERVAL_MS = 30 * 60_000;
+const BACKGROUND_REFRESH_MS = 5 * 60_000;
 const storeListeners = new Set<() => void>();
 let storeSnapshot: UsageStoreSnapshot = {
   data: null,
@@ -256,6 +256,37 @@ function UsageWindow({
   );
 }
 
+function CreditsNote({ detail }: { detail: string | null }) {
+  return (
+    <p role="status" className="flex gap-[7px] text-destructive-text">
+      <span aria-hidden="true" className="text-subtle-foreground">
+        └
+      </span>
+      <span className="min-w-0">
+        paying API prices{detail === null ? "" : ` · ${detail}`}
+      </span>
+    </p>
+  );
+}
+
+function accountsOnCredits(
+  snapshot: UsageSnapshot | null,
+): Map<string, string> {
+  const paid = new Map<string, string>();
+  for (const machine of snapshot?.machines ?? [])
+    for (const provider of machine.providers)
+      if (
+        provider.usage?.status === "ok" &&
+        provider.usage.credits &&
+        provider.inUse !== false
+      )
+        paid.set(
+          `${provider.providerId}:${accountName(provider) ?? machine.id}`,
+          provider.displayName,
+        );
+  return paid;
+}
+
 /** A tree-style status line under a provider, like `└ not installed`. */
 function UsageNote({ children }: { children: string }) {
   return (
@@ -311,16 +342,21 @@ function ProviderUsageBody({ provider, onCodexSignedIn }: { provider: UsageProvi
   switch (usage.status) {
     case "ok":
       return usage.windows.length === 0 ? (
-        <UsageNote>No usage limits reported for this plan.</UsageNote>
+        usage.credits ? (
+          <CreditsNote detail={usage.credits.detail} />
+        ) : (
+          <UsageNote>No usage limits reported for this plan.</UsageNote>
+        )
       ) : (
         <div>
           {usage.windows.map((window, index) => (
             <UsageWindow
               key={window.label}
               window={window}
-              last={index === usage.windows.length - 1}
+              last={!usage.credits && index === usage.windows.length - 1}
             />
           ))}
+          {usage.credits ? <CreditsNote detail={usage.credits.detail} /> : null}
         </div>
       );
     case "not_installed":
@@ -766,7 +802,7 @@ function ProviderUsageStatus(props: ExperimentalSidebarFooterDisclosureProps) {
 
 export default definePluginApp((app) => {
   app.slots.settingsSection({ id: "usage", component: UsageSettings });
-  app.experimental_sidebarFooter.register({
+  const footer = app.experimental_sidebarFooter.register({
     kind: "disclosure",
     id: "usage",
     label: "Provider usage",
@@ -782,23 +818,49 @@ export default definePluginApp((app) => {
       const scheduleSafetyRefresh = () => {
         if (timer !== null) window.clearTimeout(timer);
         timer = null;
-        if (signal.aborted || document.visibilityState !== "visible") return;
-        timer = window.setTimeout(runSafetyRefresh, SAFETY_REFRESH_INTERVAL_MS);
+        if (signal.aborted) return;
+        timer = window.setTimeout(runSafetyRefresh, BACKGROUND_REFRESH_MS);
       };
-      const reconcile = (maxAgeMs: number, machineIds: string[] | null) => {
-        void refreshUsage({
-          force: false,
-          machineIds,
-          maxAgeMs,
-          signal,
-        });
+      const reconcile = async (maxAgeMs: number) => {
+        if (storeSnapshot.data === null)
+          await refreshUsage({
+            force: false,
+            machineIds: null,
+            maxAgeMs,
+            signal,
+          });
+        const machineIds = (storeSnapshot.data?.machines ?? [])
+          .filter((machine) => machine.status === "connected")
+          .map((machine) => machine.id);
+        if (machineIds.length > 0 && !signal.aborted)
+          await refreshUsage({ force: false, machineIds, maxAgeMs, signal });
       };
       const runSafetyRefresh = () => {
-        if (document.visibilityState === "visible") {
-          reconcile(SAFETY_REFRESH_INTERVAL_MS, null);
-        }
+        void reconcile(BACKGROUND_REFRESH_MS);
         scheduleSafetyRefresh();
       };
+      let notified = new Set<string>();
+      const showCredits = () => {
+        const paid = accountsOnCredits(storeSnapshot.data);
+        const names = [...new Set(paid.values())];
+        footer.setAlert(
+          names.length === 0
+            ? null
+            : `${names.join(" and ")} on usage credits at API pricing`,
+        );
+        for (const [key, name] of paid)
+          if (
+            !notified.has(key) &&
+            typeof Notification !== "undefined" &&
+            Notification.permission === "granted"
+          )
+            new Notification(`${name} is using usage credits`, {
+              body: "Your plan limit is at 100%. New requests are billed at API pricing.",
+              tag: `provider-usage-credits-${key}`,
+            });
+        if (storeSnapshot.data !== null) notified = new Set(paid.keys());
+      };
+      const unsubscribe = subscribeStore(showCredits);
       const onActive = () => {
         const inactiveAt =
           hiddenAt === null
@@ -812,15 +874,13 @@ export default definePluginApp((app) => {
           inactiveAt !== null &&
           Date.now() - inactiveAt >= FOCUS_MAX_AGE_MS
         ) {
-          reconcile(FOCUS_MAX_AGE_MS, null);
+          void reconcile(FOCUS_MAX_AGE_MS);
         }
         scheduleSafetyRefresh();
       };
       const onVisibilityChange = () => {
         if (document.visibilityState === "hidden") {
           hiddenAt ??= Date.now();
-          if (timer !== null) window.clearTimeout(timer);
-          timer = null;
           return;
         }
         onActive();
@@ -831,9 +891,11 @@ export default definePluginApp((app) => {
       document.addEventListener("visibilitychange", onVisibilityChange);
       window.addEventListener("blur", onBlur);
       window.addEventListener("focus", onActive);
-      reconcile(SAFETY_REFRESH_INTERVAL_MS, null);
+      void reconcile(BACKGROUND_REFRESH_MS);
       scheduleSafetyRefresh();
       return () => {
+        unsubscribe();
+        footer.setAlert(null);
         if (timer !== null) window.clearTimeout(timer);
         document.removeEventListener("visibilitychange", onVisibilityChange);
         window.removeEventListener("blur", onBlur);

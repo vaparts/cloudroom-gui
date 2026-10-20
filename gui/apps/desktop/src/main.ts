@@ -150,11 +150,13 @@ import {
   reportDesktopUpdate,
   resumeThreadsAfterUpdate,
   runningLocalThreadIds,
+  noteUpdateAttempt,
   saveUpdateAttempt,
   stopThreadsForUpdate,
 } from "./desktop-update-resume.js";
 import {
   installNeedsPassword,
+  macAppLocation,
   reopenAfterExit,
   startIdleInstall,
   takeAppOwnership,
@@ -1661,15 +1663,22 @@ async function installDownloadedUpdate(): Promise<void> {
     process.platform === "darwin" &&
     app.isPackaged &&
     reopenAfterExit(process.execPath, process.pid);
+  const attemptDir = resolveDataDirFromEnv({ env: process.env, homeDir: homedir() });
   try {
     const pendingVersion = desktopAutoUpdateService.getInfo().pendingVersion;
     if (process.platform === "darwin" && pendingVersion) {
+      // Where the app runs and whether this user can replace it are the usual
+      // reasons Squirrel.Mac never installs, so the failure report carries them.
       await saveUpdateAttempt(
-        resolveDataDirFromEnv({ env: process.env, homeDir: homedir() }),
+        attemptDir,
         getDesktopVersion(process.env.BB_DESKTOP_VERSION),
         displayVersion(pendingVersion),
+        { location: macAppLocation(process.execPath), needs_password: installNeedsPassword(process.execPath) },
       ).catch((error: unknown) => {
         desktopLogger.error(`Saving the update attempt failed: ${String(error)}`);
+      });
+      autoUpdater.once("error", (error: Error) => {
+        void noteUpdateAttempt(attemptDir, { updater_error: String(error?.message ?? error).slice(0, 300) }).catch(() => {});
       });
     }
     if (currentRuntime?.ownership === "spawned") {
@@ -1691,7 +1700,7 @@ async function installDownloadedUpdate(): Promise<void> {
     if (reopens) {
       setTimeout(() => {
         desktopLogger.error("The update didn't quit Cloudroom in time; exiting so it reopens.");
-        app.exit(0);
+        void noteUpdateAttempt(attemptDir, { quit_timeout: true }).catch(() => {}).finally(() => app.exit(0));
       }, UPDATE_QUIT_TIMEOUT_MS);
     }
   }

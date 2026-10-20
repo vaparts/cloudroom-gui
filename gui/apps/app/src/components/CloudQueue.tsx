@@ -6,17 +6,16 @@ import { SidebarMenuItem } from "@/components/ui/sidebar";
 import { cn } from "@cloudroom/shared-ui/lib/utils";
 import { appToast } from "@/components/ui/app-toast";
 import { useCloudroomAccount } from "@/hooks/queries/cloudroom-queries";
-import { openUrlInExternalBrowser } from "@/lib/url-open-routing";
+import { openUpgrade, useUpgradePromptViewed } from "@/lib/upgrade-prompt";
 
 // The cloud queue (docs/scopes/public-launch.md): Free accounts wait in line to start Cloud threads. Everything else,
 // including Local threads, works as usual. The website decides; these only show it.
 export type CloudQueue = { position: number; total: number; regionBlocked: boolean };
 
-const upgrade = () => openUrlInExternalBrowser("https://www.cloudroom.dev/billing");
-
 /** Under the new-thread composer while Cloud is picked and the account waits. */
 export function CloudQueueCard({ queue, onUseLocal }: { queue: CloudQueue; onUseLocal: () => void }) {
   const local = <Button type="button" size="sm" variant="outline" onClick={onUseLocal}><Icon name="Laptop" aria-hidden />Run it on Local</Button>;
+  useUpgradePromptViewed(queue.regionBlocked ? null : "queue");
   if (queue.regionBlocked) {
     return (
       <section aria-label="Cloud unavailable" className="mt-3 flex gap-3 rounded-lg border border-foreground/10 bg-surface-raised-solid p-4">
@@ -44,7 +43,7 @@ export function CloudQueueCard({ queue, onUseLocal }: { queue: CloudQueue; onUse
         <p className="mt-1 text-xs leading-relaxed text-muted-foreground">We let people into the cloud in small batches so it stays fast. We'll tell you here when it's your turn. Local threads work right now.</p>
         <div className="mt-3 h-1 overflow-hidden rounded-full bg-foreground/10"><div className="h-full rounded-full bg-primary" style={{ width: `${behind}%` }} /></div>
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <Button type="button" size="sm" onClick={upgrade}><Icon name="Zap" aria-hidden />Skip the queue with Pro</Button>
+          <Button type="button" size="sm" onClick={() => openUpgrade("queue")}><Icon name="Zap" aria-hidden />Skip the queue with Pro</Button>
           {local}
           <span className="text-xs text-muted-foreground">Pro is $50/month</span>
         </div>
@@ -58,13 +57,14 @@ const share = (used: number, limit: number) => limit > 0 ? Math.min(used / limit
 /** Free accounts always see their usage. Pro accounts already pay, so theirs shows only once a limit is 80% used. */
 export function PlanCard() {
   const usage = useCloudroomAccount().data?.planUsage ?? null;
-  if (!usage) return null;
-  const pro = usage.plan === "pro";
-  const rows = [
+  const pro = usage?.plan === "pro";
+  const rows = usage ? [
     { label: "cloud agents", used: usage.agents, limit: usage.agentsLimit },
     ...(usage.cpuHours === null ? [] : [{ label: "cloud hours", used: usage.cpuHours, limit: usage.cpuHoursLimit }]),
-  ];
-  if (pro && !rows.some(({ used, limit }) => share(used, limit) >= 0.8)) return null;
+  ] : [];
+  const hidden = !usage || (pro && !rows.some(({ used, limit }) => share(used, limit) >= 0.8));
+  useUpgradePromptViewed(hidden ? null : "plan_card");
+  if (hidden) return null;
   return (
     <section aria-label={pro ? "Pro plan" : "Free plan"} className="rounded-lg border border-border bg-surface-raised-solid p-3">
       <p className="text-xs text-muted-foreground">{pro ? "Pro plan" : "Free plan"}</p>
@@ -77,7 +77,7 @@ export function PlanCard() {
           </div>
         );
       })}
-      <Button type="button" size="sm" variant={pro ? "outline" : "default"} className="mt-3 w-full" onClick={upgrade}>
+      <Button type="button" size="sm" variant={pro ? "outline" : "default"} className="mt-3 w-full" onClick={() => openUpgrade("plan_card")}>
         {pro ? "Get 3× more with Super" : "Get 10× more with Pro"}<span className="ml-auto font-normal opacity-70">{pro ? "$150/mo" : "$50/mo"}</span><Icon name="ArrowRight" aria-hidden />
       </Button>
     </section>
@@ -99,12 +99,13 @@ const nextReason = () => PRO_REASONS[(lastReason = (lastReason + 1) % PRO_REASON
 export function FreePlanTip() {
   const usage = useCloudroomAccount().data?.planUsage ?? null;
   const [reason] = useState(nextReason);
+  useUpgradePromptViewed(usage?.plan === "free" ? "free_tip" : null);
   if (usage?.plan !== "free") return null;
   return (
     <p className="mt-3 flex min-w-0 items-center gap-2 px-3.5 text-xs text-muted-foreground">
       <Icon name="Zap" className="size-3.5 shrink-0 text-primary-text" aria-hidden />
       <span className="truncate">{reason}</span>
-      <Button type="button" variant="link" size="sm" className="h-auto shrink-0 gap-0.5 p-0 text-xs font-semibold" onClick={upgrade}>
+      <Button type="button" variant="link" size="sm" className="h-auto shrink-0 gap-0.5 p-0 text-xs font-semibold" onClick={() => openUpgrade("free_tip")}>
         Upgrade<Icon name="ArrowRight" aria-hidden />
       </Button>
     </p>
@@ -122,12 +123,13 @@ export function CloudQueueChip() {
       appToast.success("You're in! Cloud threads are ready.");
     }
   }, [queue]);
+  useUpgradePromptViewed(queue && !queue.regionBlocked ? "queue_badge" : null);
   if (!queue || queue.regionBlocked) return null;
   return (
     <SidebarMenuItem data-footer-item="cloud-queue">
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button variant="ghost" aria-label={`Cloud queue: number ${queue.position}`} className="h-[26px] gap-1 rounded-md bg-primary/15 px-2 text-xs font-medium text-primary hover:bg-primary/25 hover:text-primary [&_[data-icon-root]]:size-3.5" onClick={upgrade}>
+          <Button variant="ghost" aria-label={`Cloud queue: number ${queue.position}`} className="h-[26px] gap-1 rounded-md bg-primary/15 px-2 text-xs font-medium text-primary hover:bg-primary/25 hover:text-primary [&_[data-icon-root]]:size-3.5" onClick={() => openUpgrade("queue_badge")}>
             <Icon name="Cloud" aria-hidden />
             #{queue.position.toLocaleString("en-US")}
           </Button>

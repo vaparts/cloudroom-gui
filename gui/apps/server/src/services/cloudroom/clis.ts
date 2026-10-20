@@ -4,7 +4,8 @@ import { findCliExecutable } from "@cloudroom/process-utils";
 export interface MacCli { name: string; title: string; key?: string; install: string }
 
 // Every line was tested as the agent on a fresh sandbox (Debian 12, arm64, no gpg) on 2026-10-14. `command -v` skips
-// the install when the setup script runs again after an edit.
+// the install when the setup script runs again. A CLI still missing after its install prints `setup-failed: NAME`, so
+// the setup runner (web/lib/sandbox-logins.ts) tries again on the next wake.
 const apt = (pkg: string) => `sudo apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ${pkg}`;
 const npm = (pkg: string) => `sudo npm install -g --silent ${pkg}`;
 const aptRepo = (name: string, key: string, source: string, pkg: string) => `{
@@ -50,6 +51,6 @@ const CLIS: (Omit<MacCli, "install"> & { run: string })[] = [
 export function macClis(): MacCli[] {
   return CLIS.filter(cli => findCliExecutable(cli.name)).map(({ run, ...cli }) => ({
     ...cli,
-    install: `# ${cli.title} (${cli.name})${cli.key ? `. Signs in with ${cli.key} from API keys.` : ""}\ncommand -v ${cli.name} >/dev/null || ${run}`,
+    install: `# ${cli.title} (${cli.name})${cli.key ? `. Signs in with ${cli.key} from API keys.` : ""}\ncommand -v ${cli.name} >/dev/null || ${run}\ncommand -v ${cli.name} >/dev/null || echo "setup-failed: ${cli.name}"`,
   }));
 }

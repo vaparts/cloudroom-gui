@@ -946,6 +946,11 @@ export interface ExperimentalSidebarFooterDisclosureController {
   close(): void;
   /** Open this disclosure, or close it when it is currently open. */
   toggle(): void;
+  /**
+   * Show a red dot on this item's icon, with `message` as its accessible
+   * reason, or clear it with null. Experimental: see `docs/api_to_audit.md`.
+   */
+  setAlert(message: string | null): void;
 }
 
 /** Managed registration surface for items in the app sidebar footer. */

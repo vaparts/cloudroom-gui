@@ -721,7 +721,6 @@ function MarkdownCode({
   const codeText = String(children ?? "").replace(/\n$/, "");
   const language = getMarkdownCodeLanguage({ className: codeClassName });
   const isBlock = isMarkdownCodeBlock({ codeText, language });
-  const [softWrap, setSoftWrap] = useState(false);
   const highlightedHtml = useMemo(
     () =>
       isBlock && language !== "mermaid"
@@ -744,34 +743,11 @@ function MarkdownCode({
     }
 
     return (
-      <div className="my-2 overflow-hidden rounded-md border border-border bg-surface-recessed">
-        <div className="flex items-center justify-between pl-3 pr-1.5 pt-1.5">
-          <span className="font-mono text-xs uppercase text-muted-foreground">
-            {language ?? ""}
-          </span>
-          <div className="flex items-center gap-0.5">
-            <button
-              type="button"
-              aria-pressed={softWrap}
-              aria-label={softWrap ? "Disable line wrap" : "Wrap long lines"}
-              onClick={() => {
-                setSoftWrap((value) => !value);
-              }}
-              className="inline-flex size-5 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:text-foreground aria-pressed:text-foreground"
-            >
-              <Icon name="TextWrap" className="size-3" />
-            </button>
-            <CopyButton text={codeText} label="Copy code" />
-          </div>
+      <div className="my-2 overflow-clip rounded-md border border-border bg-surface-recessed">
+        <div className="sticky top-2 z-[2] mt-2 h-0">
+          <MarkdownCodeCopyButton codeText={codeText} />
         </div>
-        <pre
-          className={cn(
-            "bb-code-highlight px-3 pb-3 pt-1",
-            softWrap
-              ? "whitespace-pre-wrap [overflow-wrap:anywhere]"
-              : "overflow-x-auto",
-          )}
-        >
+        <pre className="bb-code-highlight overflow-x-auto px-3 pb-3 pr-12 pt-3">
           {highlightedMarkup === null ? (
             <code className="font-mono text-xs" {...props}>
               {codeText}
@@ -811,6 +787,35 @@ function MarkdownCode({
     <MarkdownInlineCode codeText={codeText} {...props}>
       {children}
     </MarkdownInlineCode>
+  );
+}
+
+function MarkdownCodeCopyButton({ codeText }: { codeText: string }) {
+  const { copied, copy } = useClipboardCopy({ text: codeText });
+  const [hovered, setHovered] = useState(false);
+  return (
+    <TooltipProvider delayDuration={300}>
+      <Tooltip open={hovered || copied} onOpenChange={setHovered}>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            aria-label="Copy code"
+            onClick={() => {
+              void copy();
+            }}
+            className="absolute right-2 top-0 inline-flex size-7 cursor-pointer items-center justify-center rounded-md border border-border bg-surface-recessed-solid text-muted-foreground shadow-sm transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <Icon
+              name={copied ? "Check" : "Copy"}
+              className={cn("size-4", copied && "text-success")}
+            />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="left">
+          {copied ? "Copied" : "Copy code"}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
 

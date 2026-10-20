@@ -39,6 +39,8 @@ import type {
 } from "./event-projection-types.js";
 import { getProviderModelFallbackData } from "./model-fallback-extraction.js";
 
+const STORAGE_OPERATIONS = new Set(["storage_warning", "storage_pause", "storage_recovered"]);
+
 type ParseOperationMessageOptions = Pick<
   BuildEventProjectionMessagesOptions,
   "includeDiagnosticOperations" | "providerDisplayName" | "threadName"
@@ -576,15 +578,15 @@ export function parseOperationMessage(
       decoded.operation === "edit_message" ||
       decoded.operation === "checkpoint" ||
       decoded.operation === THREAD_HARNESS_SWITCH_OPERATION ||
-      decoded.operation === THREAD_IMPORT_OPERATION
+      decoded.operation === THREAD_IMPORT_OPERATION ||
+      // Cloud disk notices show as one live card above the composer instead.
+      STORAGE_OPERATIONS.has(decoded.operation)
     ) {
       return null;
     }
 
     const threadOperation = createThreadOperationMetadata(decoded);
-    const title = ["storage_warning", "storage_pause", "storage_recovered"].includes(decoded.operation)
-      ? decoded.message
-      : threadOperationTitle(threadOperation, threadName);
+    const title = threadOperationTitle(threadOperation, threadName);
 
     const branch =
       typeof decoded.metadata?.branch === "string"

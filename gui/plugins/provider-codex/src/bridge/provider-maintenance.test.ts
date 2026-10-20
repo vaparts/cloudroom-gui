@@ -56,6 +56,7 @@ describe("Codex provider maintenance", () => {
       accountEmail: "codex@example.com",
       planLabel: "Plus",
       plan: { id: "plus", multiplier: null },
+      credits: null,
       windows: [
         {
           label: "Current session",
@@ -309,6 +310,7 @@ describe("Codex credential health and usage", () => {
         accountEmail: "codex@example.com",
         planLabel: "Plus",
         plan: { id: "plus", multiplier: null },
+        credits: null,
         windows: [
           {
             label: "Current session",

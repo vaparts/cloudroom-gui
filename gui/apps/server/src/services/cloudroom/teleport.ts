@@ -28,7 +28,7 @@ import { pendingImportFork } from "../threads/thread-fork-history.js";
 import { stopThreadForCurrentState } from "../threads/thread-lifecycle.js";
 import { resolveThreadRuntimeCommandConfig } from "../threads/thread-runtime-config.js";
 import { cloudroomSystemPrompt } from "../threads/custom-instructions.js";
-import { cloudroom, promptPayload } from "./commands.js";
+import { cloudPromptLimit, cloudroom, promptPayload } from "./commands.js";
 import { copyProject, planProjectCopy } from "./project-copy.js";
 import {
   CloudroomError,
@@ -727,6 +727,7 @@ class Teleport {
           state.queuedDisplay![index]!,
           getThread(this.deps.db, state.threadId)!.providerId,
           true,
+          cloudPromptLimit({ long_prompts: capability.long_prompts === true }),
         );
         return {
           text: [

@@ -2,6 +2,7 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { cloudroomCommands, cloudroomThreads, threads, threadPluginMetadata, type DbQueryConnection } from "@cloudroom/db";
 import type { ProjectCopyProgress, TeleportLocalStep } from "@cloudroom/domain";
 import { emitPluginThreadStatusEntered } from "../plugins/plugin-thread-events.js";
+import { noteTurnFailed } from "../system/auth-failure-telemetry.js";
 
 export type TeleportProgress = {
   id: string; owner: string; phase: "checking" | "stopping" | "uploading" | "running" | "complete" | "cancelled" | "error" | "cancelling";
@@ -121,4 +122,5 @@ export function effectivePrompt(db: DbQueryConnection, threadId: string, id: str
 export function saveStatus(db: DbQueryConnection, threadId: string, status: typeof threads.$inferSelect["status"]): void {
   const thread = db.update(threads).set({ status, updatedAt: Date.now(), latestAttentionAt: Date.now() }).where(and(eq(threads.id, threadId), sql`${threads.status} != ${status}`)).returning().get();
   if (thread) emitPluginThreadStatusEntered(thread);
+  if (thread?.status === "error") noteTurnFailed(thread.id);
 }

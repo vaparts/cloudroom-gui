@@ -308,11 +308,45 @@ const codexUsageResponseSchema = z.object({
   plan_type: z.string().nullish(),
   rate_limit: z
     .object({
+      allowed: z.boolean().nullish(),
+      limit_reached: z.boolean().nullish(),
       primary_window: codexUsageWindowSchema.nullish(),
       secondary_window: codexUsageWindowSchema.nullish(),
     })
     .nullish(),
+  credits: z
+    .object({
+      has_credits: z.boolean().nullish(),
+      unlimited: z.boolean().nullish(),
+      balance: z.union([z.string(), z.number()]).nullish(),
+    })
+    .nullish()
+    .catch(null),
 });
+
+function usageCredits(
+  usage: z.infer<typeof codexUsageResponseSchema>,
+): { detail: string | null } | null {
+  const limited =
+    usage.rate_limit?.limit_reached === true ||
+    [usage.rate_limit?.primary_window, usage.rate_limit?.secondary_window].some(
+      (window) => window != null && window.used_percent >= 100,
+    );
+  if (
+    !limited ||
+    usage.credits?.has_credits !== true ||
+    usage.credits.unlimited === true ||
+    usage.rate_limit?.allowed === false
+  )
+    return null;
+  const balance = usage.credits.balance;
+  if (balance == null || balance === "") return { detail: null };
+  return {
+    detail: /^[\d.,]+$/u.test(String(balance))
+      ? `${balance} credits left`
+      : `${balance} left`,
+  };
+}
 
 function usageWindow(
   value: z.infer<typeof codexUsageWindowSchema> | null | undefined,
@@ -372,6 +406,7 @@ function normalizeUsage(raw: unknown, email: string | null): ProviderUsage {
     status: "ok",
     accountEmail: email,
     planLabel: planLabel(parsed.data.plan_type),
+    credits: usageCredits(parsed.data),
     plan: parsed.data.plan_type
       ? { id: parsed.data.plan_type, multiplier: null }
       : null,

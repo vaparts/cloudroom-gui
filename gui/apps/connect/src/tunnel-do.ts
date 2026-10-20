@@ -22,8 +22,13 @@ export interface Env {
 const TUNNEL_TAG = "tunnel";
 const RESP_HEAD_TIMEOUT_MS = 30_000;
 const PRESENCE_INTERVAL_MS = 50_000;
+/** The Mac pings every 10s. A sleeping Mac's socket can still look open for minutes, so a silent one is gone. */
+const HEARTBEAT_STALE_MS = 30_000;
 
 const WS_READY_STATE_OPEN = 1;
+
+/** Saved on the Mac's tunnel socket, for the heartbeat check and logs. */
+type TunnelInfo = { connectedAt?: number; mac?: string };
 
 export const TUNNEL_OFFLINE_HEADER = "x-bb-tunnel-offline";
 
@@ -183,7 +188,16 @@ export class TunnelDO {
   private tunnelSocket(): WebSocket | null {
     const sockets = this.state.getWebSockets(TUNNEL_TAG);
     for (let i = sockets.length - 1; i >= 0; i--) {
-      if (sockets[i].readyState === WS_READY_STATE_OPEN) return sockets[i];
+      const ws = sockets[i];
+      if (ws.readyState !== WS_READY_STATE_OPEN) continue;
+      const { connectedAt = 0, mac } = (ws.deserializeAttachment() as TunnelInfo | null) ?? {};
+      const lastPing = this.state.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? 0;
+      const silentMs = Date.now() - Math.max(connectedAt, lastPing);
+      if (silentMs <= HEARTBEAT_STALE_MS) return ws;
+      console.log({ event: "tunnel_silent_dropped", mac, silentSeconds: Math.round(silentMs / 1000) });
+      try {
+        ws.close(1011, "heartbeat timed out");
+      } catch {}
     }
     return null;
   }
@@ -253,7 +267,10 @@ export class TunnelDO {
       void this.markPresence();
       void this.state.storage.setAlarm(Date.now() + PRESENCE_INTERVAL_MS);
     }
+    const mac = new URL(request.url).hostname.split(".")[0];
+    console.log({ event: "tunnel_connected", mac });
     const pair = new WebSocketPair();
+    pair[1].serializeAttachment({ connectedAt: Date.now(), mac } satisfies TunnelInfo);
     this.state.acceptWebSocket(pair[1], [TUNNEL_TAG]);
     return new Response(null, { status: 101, webSocket: pair[0] });
   }
@@ -590,6 +607,9 @@ export class TunnelDO {
   webSocketClose(ws: WebSocket, code: number, reason: string): void {
     const tags = this.state.getTags(ws);
     if (tags.includes(TUNNEL_TAG)) {
+      const { connectedAt, mac } = (ws.deserializeAttachment() as TunnelInfo | null) ?? {};
+      const connectedSeconds = connectedAt ? Math.round((Date.now() - connectedAt) / 1000) : null;
+      console.log({ event: "tunnel_closed", mac, code, reason, connectedSeconds });
       if (this.tunnelSocket() !== null) return;
       this.abandonStreams(
         "tunnel disconnected mid-request",

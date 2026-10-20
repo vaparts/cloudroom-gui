@@ -890,16 +890,17 @@ Cloud loops run on Cloudroom's servers, even while this Mac is off: every minute
 15 minutes. A --cron run starts a fresh Cloud thread in its own sandbox from that thread's project and agent;
 --same-thread re-prompts the thread instead.
 A one-time --at/--in run re-prompts the thread; --new-thread gives it a fresh one.
-A fresh-thread loop saves the thread's settings, so it keeps running after that thread is archived.
+A fresh-thread loop saves the thread's settings, so it keeps running after that thread is archived. Its runs use
+the thread's agent unless --provider, --model, or --reasoning picks another; update changes it.
 A --script/--script-file runs first (60 s), in the loop's own sandbox with fresh threads, else in the thread's:
 no output skips the run, output is added to the prompt.
 A --webhook loop, Local or Cloud, runs when its secret URL gets a POST: create prints the URL once, and each run gets
 the requests that arrived as data. Cloud runs start within seconds; this Mac checks for Local ones about once a minute,
 and they wait while it is off. A Local webhook loop an agent creates starts paused: a person turns it on in Loops.
-room-cli automation create --cloud --thread <cloudThreadId> --name <name> --prompt <text> (--cron <expr> --timezone <tz> | --at <datetime> | --in <duration> | --webhook) [--new-thread | --same-thread] [--script <inline> | --script-file <path>]
+room-cli automation create --cloud --thread <cloudThreadId> --name <name> --prompt <text> (--cron <expr> --timezone <tz> | --at <datetime> | --in <duration> | --webhook) [--new-thread | --same-thread] [--script <inline> | --script-file <path>] [--provider <id>] [--model <model>] [--reasoning <level>]
 room-cli automation list --cloud [--thread <cloudThreadId>]
 room-cli automation show|pause|resume|run|hook <cloudAutomationId>
-room-cli automation update <cloudAutomationId> [--name <name>] [--prompt <text>] [schedule flags] [--script <inline> | --script-file <path> | --no-script]
+room-cli automation update <cloudAutomationId> [--name <name>] [--prompt <text>] [schedule flags] [--script <inline> | --script-file <path> | --no-script] [--provider <id>] [--model <model>] [--reasoning <level>]
 room-cli automation delete <cloudAutomationId> --yes
 `;
 }
@@ -927,7 +928,14 @@ function printCloudAutomation(a: CloudAutomation): string {
   const schedule = a.cron ? `${a.cron} (${a.timezone})` : webhook ? "on webhook" : `once at ${a.run_at}`;
   const state = !a.enabled ? "paused" : webhook ? (a.next_run_at ? "running its webhooks" : "waiting for a webhook") : `next run ${a.next_run_at ?? "within a minute"}`;
   const mode = `${a.new_thread ? "new thread per run" : "re-prompts"}${a.script ? " · script" : ""}`;
-  return `${a.id}  ${a.name}\n  Cloud thread ${a.thread_id} · ${mode} · ${schedule} · ${state} · ${a.runs} runs${a.last_error ? `\n  Last error: ${a.last_error}` : ""}\n${a.url ? webhookNote(a.url) : ""}`;
+  const agent = a.agent ? `\n  Agent: ${a.agent.provider} · ${a.agent.model ?? "default model"}${a.agent.reasoning ? ` · ${a.agent.reasoning}` : ""}` : "";
+  return `${a.id}  ${a.name}\n  Cloud thread ${a.thread_id} · ${mode} · ${schedule} · ${state} · ${a.runs} runs${agent}${a.last_error ? `\n  Last error: ${a.last_error}` : ""}\n${a.url ? webhookNote(a.url) : ""}`;
+}
+
+/** The agent a fresh-thread cloud loop runs, when --provider, --model, or --reasoning picks one. */
+function cloudAgent(args: ParsedArgs): { harness?: string; model?: string; reasoning?: string } {
+  const harness = flag(args, "provider"), model = flag(args, "model"), reasoning = flag(args, "reasoning");
+  return { ...(harness ? { harness } : {}), ...(model ? { model } : {}), ...(reasoning ? { reasoning: parseReasoningLevel(reasoning) } : {}) };
 }
 
 /** A webhook loop's URL, printed only when it is created or replaced. */
@@ -968,18 +976,16 @@ async function runCloudCommand(bb: Pick<BbPluginApi, "sdk">, args: ParsedArgs, c
     return { exitCode: 0, stdout: optionalJson(args, found) ?? printCloudAutomation(found) };
   }
   if (args.command === "create") {
-    if (["provider", "model", "environment"].some((name) => args.flags.has(name))) {
-      throw new Error("Cloud loops use their Cloud thread's harness and model. Drop --provider, --model, and --environment.");
-    }
+    if (args.flags.has("environment")) throw new Error("Cloud loops run in their Cloud thread's project. Drop --environment.");
     const thread = flag(args, "thread") ?? ctx.threadId;
     if (!thread) throw new Error("Missing required option --thread <cloudThreadId>.");
     const schedule = boolFlag(args, "webhook") && buildTrigger(args).triggerType === "webhook" ? { webhook: true as const } : cloudSchedule(args);
     if (!schedule) throw new Error("Provide exactly one trigger flag: --cron, --at, --in, or --webhook.");
     return one({ action: "create", thread, name: requireFlag(args, "name"), prompt: requireFlag(args, "prompt"), ...schedule, enabled: !boolFlag(args, "disabled"),
-      ...(boolFlag(args, "new-thread") ? { new_thread: true } : boolFlag(args, "same-thread") ? { new_thread: false } : {}), ...await cloudScript(bb, args, ctx) }, "created");
+      ...(boolFlag(args, "new-thread") ? { new_thread: true } : boolFlag(args, "same-thread") ? { new_thread: false } : {}), ...await cloudScript(bb, args, ctx), ...cloudAgent(args) }, "created");
   }
   if (args.command === "update") {
-    const fields = { ...(flag(args, "name") ? { name: flag(args, "name") } : {}), ...(flag(args, "prompt") ? { prompt: flag(args, "prompt") } : {}), ...cloudSchedule(args), ...await cloudScript(bb, args, ctx) };
+    const fields = { ...(flag(args, "name") ? { name: flag(args, "name") } : {}), ...(flag(args, "prompt") ? { prompt: flag(args, "prompt") } : {}), ...cloudSchedule(args), ...await cloudScript(bb, args, ctx), ...cloudAgent(args) };
     return one({ action: "update", id: requireId(), ...fields }, "updated");
   }
   if (args.command === "pause" || args.command === "resume") return one({ action: "update", id: requireId(), enabled: args.command === "resume" }, args.command === "pause" ? "paused" : "resumed");

@@ -14,6 +14,10 @@ export const codexListSchema = z.object({
       plan: z.string().nullable(),
       inUse: z.boolean(),
       error: z.string().nullable(),
+      credits: z
+        .object({ detail: z.string().nullable() })
+        .nullable()
+        .default(null),
       windows: z.array(
         z.object({
           label: z.string(),

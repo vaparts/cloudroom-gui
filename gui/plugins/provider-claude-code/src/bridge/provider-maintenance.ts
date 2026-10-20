@@ -440,8 +440,43 @@ const claudeUsageResponseSchema = z
       .array(claudeScopedUsageLimitSchema.nullable().catch(null))
       .nullish()
       .catch([]),
+    extra_usage: z
+      .object({
+        is_enabled: z.boolean().nullish(),
+        monthly_limit: z.number().nullish(),
+        used_credits: z.number().nullish(),
+        currency: z.string().length(3).nullish(),
+      })
+      .nullish()
+      .catch(null),
   })
   .passthrough();
+
+function usageCredits(
+  usage: z.infer<typeof claudeUsageResponseSchema>,
+): { detail: string | null } | null {
+  const extra = usage.extra_usage;
+  const limited = [
+    usage.five_hour?.utilization,
+    usage.seven_day?.utilization,
+    ...(usage.limits ?? []).map((limit) => limit?.percent),
+  ].some((used) => used != null && used >= 100);
+  if (!extra?.is_enabled || !limited) return null;
+  const money = (cents: number) =>
+    extra.currency
+      ? new Intl.NumberFormat("en-US", {
+          style: "currency",
+          currency: extra.currency,
+        }).format(cents / 100)
+      : (cents / 100).toFixed(2);
+  if (extra.used_credits == null) return { detail: null };
+  return {
+    detail:
+      extra.monthly_limit == null
+        ? `${money(extra.used_credits)} spent`
+        : `${money(extra.used_credits)} / ${money(extra.monthly_limit)}`,
+  };
+}
 
 function resetIso(value: string | null | undefined): string | null {
   if (!value) return null;
@@ -517,6 +552,7 @@ function normalizeUsage(
     status: "ok",
     accountEmail: email,
     planLabel: planLabel(credentials),
+    credits: usageCredits(parsed.data),
     plan: credentials.subscriptionType
       ? {
           id: credentials.subscriptionType.toLowerCase(),

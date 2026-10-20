@@ -107,10 +107,14 @@ async function codexFiles(): Promise<string[]> {
 
 async function claudeSessions(files: string[]): Promise<Found[]> {
   return compact(await mapLimit(files, async (path): Promise<Found | null> => {
-    const lines = await headLines(path, 256 * 1024);
-    if (lines.some((line) => line.isSidechain === true || /^sdk/.test(line.entrypoint ?? ""))) return null;
-    const cwd = lines.find((line) => typeof line.cwd === "string")?.cwd as string | undefined;
-    const first = lines.map(claudeUserText).find(Boolean);
+    // Stream until the first human message: newer Claude Code can write hundreds of KB of api-request lines before it.
+    let cwd: string | undefined, first: string | undefined;
+    for await (const line of readLines(path, 4 * 1024 * 1024)) {
+      if (line.isSidechain === true || /^sdk/.test(line.entrypoint ?? "")) return null;
+      cwd ??= typeof line.cwd === "string" ? line.cwd : undefined;
+      first ??= claudeUserText(line) ?? undefined;
+      if (cwd && first) break;
+    }
     if (!cwd || !first) return null;
     const tail = await tailLines(path, 64 * 1024);
     const named = (type: string, field: string) => [...tail].reverse().find((line) => line.type === type && typeof line[field] === "string" && line[field] !== "New session")?.[field] as string | undefined;
@@ -233,10 +237,15 @@ function historyRows(session: Found, turns: Turn[]): StoredEventRow[] {
   return rows;
 }
 
-export async function* readLines(path: string): AsyncGenerator<Line> {
-  for await (const text of createInterface({ input: createReadStream(path), crlfDelay: Infinity })) {
-    const line = parseLine(text);
-    if (line) yield line;
+export async function* readLines(path: string, bytes?: number): AsyncGenerator<Line> {
+  const input = createReadStream(path, { end: bytes === undefined ? undefined : bytes - 1 });
+  try {
+    for await (const text of createInterface({ input, crlfDelay: Infinity })) {
+      const line = parseLine(text);
+      if (line) yield line;
+    }
+  } finally {
+    input.destroy();
   }
 }
 

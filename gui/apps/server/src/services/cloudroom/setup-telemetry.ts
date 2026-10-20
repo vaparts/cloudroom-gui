@@ -92,12 +92,15 @@ async function reportUpdateAttempt(dataDir: string): Promise<void> {
   const text = await readFile(file, "utf8").catch(() => null);
   if (text === null) return;
   await rm(file, { force: true });
-  const attempt = JSON.parse(text) as { from: string; to: string; at: number };
+  const attempt = JSON.parse(text) as { from: string; to: string; at: number; location?: string; needs_password?: boolean; quit_timeout?: boolean; updater_error?: string };
   const version = process.env.BB_DESKTOP_VERSION ?? null;
   const failed = version === attempt.from;
   const lines = failed ? await shipItLines(attempt.at) : [];
   capture("update_install", () => ({
     outcome: failed ? "failed" : "ok", from: attempt.from, to: attempt.to, version, ms: Date.now() - attempt.at,
+    // Set by the desktop app (desktop-update-resume.ts): why Squirrel.Mac may never have installed.
+    location: attempt.location ?? null, needs_password: attempt.needs_password ?? null,
+    quit_timeout: attempt.quit_timeout ?? false, updater_error: scrub(attempt.updater_error),
     ...(failed ? { code: updateFailureCode(lines), message: scrub(lines.filter(line => /error|abort|cancel|fail/i.test(line)).at(-1)) } : {}),
   }));
 }

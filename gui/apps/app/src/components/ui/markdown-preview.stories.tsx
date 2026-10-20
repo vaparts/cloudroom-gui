@@ -73,7 +73,7 @@ GFM task list:
 
 const CODE_MARKDOWN = `Inline \`useMemo\` and \`useCallback\` for memoisation.
 
-Fenced blocks are syntax-highlighted and carry a language label, a wrap toggle, and a copy button:
+Fenced blocks are syntax-highlighted and carry a copy button that stays visible while scrolling:
 
 \`\`\`ts
 import { useMemo } from "react";
@@ -91,7 +91,7 @@ def fib(n: int) -> int:
     return n if n < 2 else fib(n - 1) + fib(n - 2)
 \`\`\`
 
-Long lines scroll horizontally until you toggle wrap (no language tag):
+Long lines scroll horizontally (no language tag):
 
 \`\`\`
 $ pnpm exec turbo run typecheck --filter=@cloudroom/app --filter=@cloudroom/server --filter=@cloudroom/host-daemon --filter=@cloudroom/cli && echo "all packages clean"

@@ -22,16 +22,25 @@ export function noteTurnFailed(threadId: string): void {
   const current = deps;
   if (!current) return;
   setImmediate(() => {
-    const failed = buildTurnFailedEvent(current.db, threadId);
-    if (failed?.errorInfo?.category !== "unauthorized") return;
     const thread = getThread(current.db, threadId);
-    if (!thread) return;
+    if (!thread || thread.deletedAt !== null) return;
+    const failed = buildTurnFailedEvent(current.db, threadId);
+    const execution = thread.executionTarget === "cloud" ? "cloud_sandbox" : "local";
+    current.telemetry.capture({
+      name: "turn_failed",
+      properties: {
+        execution,
+        is_child_thread: thread.parentThreadId !== null,
+        provider: thread.providerId,
+        error_category: failed?.errorInfo?.category ?? "unknown",
+      },
+    });
+    if (failed?.errorInfo?.category !== "unauthorized") return;
     const running = countThreads(current.db, {
       status: "active",
       providerId: thread.providerId,
       includeHidden: true,
     }).total;
-    const execution = thread.executionTarget === "cloud" ? "cloud_sandbox" : "local";
     current.logger.warn(
       {
         threadId,

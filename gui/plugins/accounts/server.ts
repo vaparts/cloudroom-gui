@@ -65,6 +65,7 @@ type Adding = {
 };
 type Usage = {
   windows: UsageWindow[];
+  credits: { detail: string | null } | null;
   error: string | null;
   signInAgain: boolean;
   at: number;
@@ -205,7 +206,7 @@ export default async function plugin(bb: BbPluginApi) {
     const before = previous?.error ?? null;
     try {
       usage.set(account.id, {
-        windows: await claudeUsage(await readSecret(account)),
+        ...(await claudeUsage(await readSecret(account))),
         error: null,
         signInAgain: false,
         at: Date.now(),
@@ -213,12 +214,18 @@ export default async function plugin(bb: BbPluginApi) {
     } catch (error) {
       usage.set(account.id, {
         windows: previous?.windows ?? [],
+        credits: previous?.credits ?? null,
         error: error instanceof Error ? error.message : String(error),
         signInAgain: error instanceof SignInAgainError,
         at: Date.now(),
       });
     }
-    if ((usage.get(account.id)?.error ?? null) !== before) await changed();
+    const measured = usage.get(account.id);
+    if (
+      (measured?.error ?? null) !== before ||
+      !measured?.credits !== !previous?.credits
+    )
+      await changed();
   };
   // A Claude check is a real 1-token reply that can open a 5-hour window,
   // so only the account in use is checked in the background.
@@ -273,6 +280,7 @@ export default async function plugin(bb: BbPluginApi) {
         inUse: id === using,
         limitedUntil: limitedUntil("claude-code", id),
         error: measured?.error ?? null,
+        credits: id === using ? (measured?.credits ?? null) : null,
         // Accounts not in use aren't checked, so a window past its reset shows empty.
         windows: (measured?.windows ?? []).map((window) =>
           window.resetsAt !== null && window.resetsAt <= Date.now()
@@ -294,6 +302,7 @@ export default async function plugin(bb: BbPluginApi) {
         inUse: false,
         limitedUntil: null,
         error: null,
+        credits: null,
         windows: [],
         needsSignIn: true,
         limitedLogin: false,
@@ -320,6 +329,7 @@ export default async function plugin(bb: BbPluginApi) {
         inUse: !selected,
         limitedUntil: limitedUntil("codex", LOCAL),
         error: null,
+        credits: null,
         windows: [],
         needsSignIn: false,
         limitedLogin: false,

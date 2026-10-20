@@ -2181,6 +2181,8 @@ Registering an action returns nothing. Registering a disclosure returns a
 controller that can request `open`, `close`, or `toggle`. Those requests go
 through the host's shared active-item coordinator, so opening one plugin's
 disclosure replaces another and a stale scoped `close` cannot dismiss a sibling.
+`setAlert(message)` puts a red dot on the item's icon and announces `message`;
+`null` clears it. Provider usage uses it while an account bills usage credits.
 The existing `app.slots.sidebarFooterAction` remains a compatibility surface and
 renders in the same footer row.
 
@@ -2206,6 +2208,8 @@ renders in the same footer row.
 7. **Focus and dismissal.** Validate icon toggling, Escape, focus return,
    disclosure replacement, plugin reload, crash isolation, and removal while
    open across desktop and compact sidebar layouts.
+8. **Alerts.** Decide whether alerts need tones or counts, and how an alert on
+   an item hidden in More should show.
 
 ## `app.slots.experimental_sidebarNavigation` (`@get-bb/plugin-sdk/app`)
 

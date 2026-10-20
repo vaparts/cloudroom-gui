@@ -19,6 +19,9 @@ export const providerUsageSchema = z.discriminatedUnion("status", [
     accountEmail: z.nullable(nonemptyStringSchema),
     planLabel: z.nullable(nonemptyStringSchema),
     windows: z.array(usageWindowSchema),
+    credits: z.optional(
+      z.nullable(z.strictObject({ detail: z.nullable(nonemptyStringSchema) })),
+    ),
   }),
   z.strictObject({ status: z.literal("not_installed") }),
   z.strictObject({ status: z.literal("unauthenticated") }),

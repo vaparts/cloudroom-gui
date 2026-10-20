@@ -64,6 +64,13 @@ export const providerUsageWindowSchema = z
 
 export type ProviderUsageWindow = z.infer<typeof providerUsageWindowSchema>;
 
+/** Set while requests bill paid usage credits at API prices instead of the plan. `detail` is spend or balance text. */
+export const providerUsageCreditsSchema = z.object({
+  detail: z.string().min(1).nullable(),
+});
+
+export type ProviderUsageCredits = z.infer<typeof providerUsageCreditsSchema>;
+
 export const providerUsageSchema = z.discriminatedUnion("status", [
   z
     .object({
@@ -71,6 +78,7 @@ export const providerUsageSchema = z.discriminatedUnion("status", [
       accountEmail: z.string().email().nullable(),
       planLabel: z.string().min(1).nullable(),
       windows: z.array(providerUsageWindowSchema),
+      credits: providerUsageCreditsSchema.nullable().optional(),
     })
     .passthrough(),
   z.object({ status: z.literal("not_installed") }).passthrough(),

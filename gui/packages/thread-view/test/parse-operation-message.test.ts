@@ -76,9 +76,9 @@ function ownershipTitle(
 }
 
 describe("parseOperationMessage operation titles", () => {
-  it.each(["storage_warning", "storage_pause", "storage_recovered"])("shows the actual %s notice instead of a generic completed-operation title", (operation) => {
-    const row = factory().systemOperation({ operation, status: "completed", message: "Cloud storage notice. Work and recovery status." });
-    expect(operationTitleFor(row, THREAD_NAME)).toBe("Cloud storage notice. Work and recovery status.");
+  it.each(["storage_warning", "storage_pause", "storage_recovered"])("hides the %s notice from the chat; the composer card shows it", (operation) => {
+    const { event, meta } = decodeThreadEventRow(factory().systemOperation({ operation, status: "completed", message: "Cloud storage notice." }));
+    expect(parseOperationMessage(event, meta, { threadName: THREAD_NAME })).toBeNull();
   });
   it("renders provider environment provenance without revealing masked values", () => {
     const event: ThreadEvent = {

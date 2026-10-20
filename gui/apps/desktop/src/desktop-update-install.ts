@@ -69,6 +69,13 @@ export function macAppBundle(execPath: string): string | null {
   return /^(.+?\.app)\/Contents\/MacOS\/[^/]+$/u.exec(execPath)?.[1] ?? null;
 }
 
+/** Where the app runs from. Squirrel.Mac can't replace a translocated app (opened from Downloads or the DMG). */
+export function macAppLocation(execPath: string): "applications" | "translocated" | "other" {
+  const bundle = macAppBundle(execPath) ?? "";
+  if (bundle.includes("/AppTranslocation/")) return "translocated";
+  return /^(\/Users\/[^/]+)?\/Applications\//u.test(bundle) ? "applications" : "other";
+}
+
 function canWrite(path: string): boolean {
   try {
     accessSync(path, constants.W_OK);

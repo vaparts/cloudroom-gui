@@ -97,6 +97,7 @@ const capabilitiesSchema = z.object({
   goal: z.boolean().default(false),
   usage: z.boolean().default(false),
   subagents: z.boolean().default(false),
+  long_prompts: z.boolean().default(false),
   harnesses: z.array(z.object({
     id: z.string(),
     model: z.string(),
@@ -182,7 +183,12 @@ function requireClaudeSkillSupport(content: unknown, capabilities: Capabilities,
   }
 }
 
-export function promptPayload(input: PromptInput[], harness: string, attachmentsEnabled: boolean | { images: boolean; files: boolean }): { text: string; content: PromptInput[]; attachments: PromptAttachment[] } {
+/** The most text one Cloud message can carry (ADR 0269). Older cores take 32 KB; unknown cores get the new limit and are rechecked on send. */
+export function cloudPromptLimit(capabilities: Pick<Capabilities, "long_prompts"> | null | undefined): number {
+  return capabilities && !capabilities.long_prompts ? 32 * 1024 : 256 * 1024;
+}
+
+export function promptPayload(input: PromptInput[], harness: string, attachmentsEnabled: boolean | { images: boolean; files: boolean }, limit: number): { text: string; content: PromptInput[]; attachments: PromptAttachment[] } {
   const skills: { name: string; chunk: number; start: number; end: number }[] = [];
   const attachments: PromptAttachment[] = [];
   const chunks: string[] = [];
@@ -216,8 +222,12 @@ export function promptPayload(input: PromptInput[], harness: string, attachments
   if (harness === "pi" && skill) text = `/skill:${skill.name}${text ? `${text.startsWith(" ") ? "" : " "}${text}` : ""}`;
   if (!text.trim() && attachments.length === 0) throw new ApiError(400, "invalid_request", "Message is empty.");
   const bytes = Buffer.byteLength(text);
-  if (bytes > 32768) throw new ApiError(400, "invalid_request", `Message is too long (${Math.ceil(bytes / 1024)} KB). Cloud messages can be up to 32 KB. Shorten it or remove quoted messages.`);
+  if (bytes > limit) throw new ApiError(400, "invalid_request", `Message is too long (${Math.ceil(bytes / 1024)} KB). ${cloudLimitText(limit)} Shorten it or remove quoted messages.`);
   return { text, content: input, attachments };
+}
+
+function cloudLimitText(limit: number): string {
+  return `Cloud messages can be up to ${limit / 1024} KB.${limit < 256 * 1024 ? " Update the cloud core to send up to 256 KB." : ""}`;
 }
 
 function coreModel(harness: CloudProvider, model: string, capabilities: z.infer<typeof capabilitiesSchema>): { model: string; provider?: string } {
@@ -246,7 +256,7 @@ function followUpPayload(harness: string, saved: Binding, payload: SendMessageRe
   if ((payload.mode === "steer" || payload.mode === "steer-if-active") && (!feature(capabilities, "steer") || profile?.steer === false)) throw new ApiError(409, "cloudroom_unsupported", "Cloud steering is not enabled. Use --mode queue.");
   if (payload.serviceTier === "fast" && !profile?.service_tier) throw new ApiError(409, "cloudroom_launch_settings", "Model is fixed for this cloud session. Start a new thread to change it.");
   if (reasoning !== null) validateFollowUpReasoning(harness, saved, reasoning, capabilities);
-  return promptPayload(payload.input, harness, capabilities.attachments && (profile?.attachments ?? true));
+  return promptPayload(payload.input, harness, capabilities.attachments && (profile?.attachments ?? true), cloudPromptLimit(capabilities));
 }
 
 function validateFollowUpReasoning(harness: string, saved: Binding, reasoning: string, capabilities: Capabilities): void {
@@ -384,7 +394,8 @@ class CloudroomService {
   private readonly streams = new Map<string, AbortController>();
   private readonly streamErrors = new Map<string, string>();
   private readonly connectionIssues = new Map<string, Partial<Record<ConnectionPhase, ConnectionIssue>>>();
-  private readonly diskFull = new Set<string>();
+  /** Threads whose cloud disk is full or low, from Core's storage records. The composer shows one live card for it. */
+  private readonly disk = new Map<string, { paused: boolean; reason: "disk_capacity" | "measurement_unavailable"; usedBytes: number | null; totalBytes: number | null }>();
   private readonly deliveries = new Map<string, Promise<void>>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private stopped = false;
@@ -1088,6 +1099,33 @@ class CloudroomService {
     return getThreadExecutionOverride(this.deps.db, threadId)?.reasoningLevelOverride ?? commandReasoning(this.prompts(threadId).at(-1)?.input ?? "") ?? saved.reasoning;
   }
 
+  /** A full disk shows one card above the composer until space recovers. Free sandboxes also get the upgrade (ADR 0206). */
+  private diskStatus(threadId: string, saved: Binding) {
+    const disk = this.disk.get(threadId);
+    return disk ? { ...disk, upgrade: disk.reason === "disk_capacity" && Boolean(sandboxThread(saved.coreUrl)) && this.sandboxes.smallDisk() } : null;
+  }
+
+  /** Records only say paused or not, so each one also reads the disk size for the card's meter. */
+  private noteDisk(threadId: string, client: CloudroomClient, data: unknown): void {
+    const record = z.object({ paused: z.boolean().optional(), reason: z.string().optional() }).catch({}).parse(data);
+    const previous = this.disk.get(threadId);
+    this.disk.set(threadId, {
+      paused: record.paused ?? previous?.paused ?? false,
+      reason: record.reason === "measurement_unavailable" ? "measurement_unavailable" : "disk_capacity",
+      usedBytes: previous?.usedBytes ?? null, totalBytes: previous?.totalBytes ?? null,
+    });
+    this.storage(client).then((storage) => {
+      const current = this.disk.get(threadId);
+      if (!current || !storage?.enabled) return;
+      // A restarted sandbox sends no "recovered" record, so a disk found fine clears the card.
+      if (storage.level === "normal") this.disk.delete(threadId);
+      else if (storage.workspace_total_bytes !== null && storage.workspace_available_bytes !== null) {
+        this.disk.set(threadId, { ...current, usedBytes: storage.workspace_total_bytes - storage.workspace_available_bytes, totalBytes: storage.workspace_total_bytes });
+      }
+      this.notify(threadId);
+    }, () => {});
+  }
+
   threadStatus(threadId: string) {
     const saved = binding(this.deps.db, threadId);
     if (!saved) return null;
@@ -1099,7 +1137,7 @@ class CloudroomService {
     const serviceTier = input.service_tier === "fast" ? "fast" : "default";
     const initial = prompts.find(item => item.id === `first_${threadId}`);
     const issues = Object.values(this.connectionIssues.get(threadId) ?? {});
-    return { authRequired: !saved.sessionId && authRequiredMessages.has(saved.error ?? ""), starting: !saved.queuePaused && Boolean(initial && ["sending", "accepted"].includes(initial.state)), sessionId: saved.sessionId, paused: saved.queuePaused, failedStart: !saved.sessionId && initial?.state === "failed", model: saved.model, reasoning, serviceTier, error: saved.error ?? issues.find(issue => !issue.reconnecting)?.message ?? null, reconnecting: issues.some(issue => issue.reconnecting), usageLimit: Boolean(sandboxThread(saved.coreUrl)) && (this.sandboxes.usageLimited() || this.sandboxes.agentLimited(sandboxThread(saved.coreUrl) ?? "")), diskFull: this.diskFull.has(threadId) && Boolean(sandboxThread(saved.coreUrl)) && this.sandboxes.smallDisk(), pendingDelivery: commands(this.deps.db, threadId).filter((c) => c.state === "sending").length };
+    return { authRequired: !saved.sessionId && authRequiredMessages.has(saved.error ?? ""), starting: !saved.queuePaused && Boolean(initial && ["sending", "accepted"].includes(initial.state)), sessionId: saved.sessionId, paused: saved.queuePaused, failedStart: !saved.sessionId && initial?.state === "failed", model: saved.model, reasoning, serviceTier, error: saved.error ?? issues.find(issue => !issue.reconnecting)?.message ?? null, reconnecting: issues.some(issue => issue.reconnecting), usageLimit: Boolean(sandboxThread(saved.coreUrl)) && (this.sandboxes.usageLimited() || this.sandboxes.agentLimited(sandboxThread(saved.coreUrl) ?? "")), disk: this.diskStatus(threadId, saved), pendingDelivery: commands(this.deps.db, threadId).filter((c) => c.state === "sending").length };
   }
 
   async create(request: CreateThreadRequest, awaitingCore = false): Promise<Thread> {
@@ -1130,7 +1168,7 @@ class CloudroomService {
     }
     const profile = capabilities ? harnessProfile(capabilities, request.providerId) : null;
     if (capabilities && request.serviceTier === "fast" && !profile?.service_tier) throw new ApiError(400, "cloudroom_unsupported", "Cloud fast service tier is not enabled");
-    const payload = promptPayload(request.input, request.providerId, capabilities?.attachments === false ? false : profile?.attachments ?? true);
+    const payload = promptPayload(request.input, request.providerId, capabilities?.attachments === false ? false : profile?.attachments ?? true, cloudPromptLimit(capabilities));
     const model = request.model;
     const reasoning = request.reasoningLevel ?? "medium";
     if (!model) throw new ApiError(400, "model_required", "Select a Codex model");
@@ -1217,7 +1255,7 @@ class CloudroomService {
     const project = getProject(this.deps.db, source.projectId);
     if (!project) throw new ApiError(404, "project_not_found", "Project not found");
     const profile = capabilities ? harnessProfile(capabilities, source.providerId) : null;
-    const payload = promptPayload(request.input, source.providerId, capabilities?.attachments === false ? false : profile?.attachments ?? true);
+    const payload = promptPayload(request.input, source.providerId, capabilities?.attachments === false ? false : profile?.attachments ?? true, cloudPromptLimit(capabilities));
     const reasoning = request.reasoningLevel ?? this.currentReasoning(source.id, saved);
     const workspace = project.id === PERSONAL_PROJECT_ID ? { workspace: ROOT_WORKSPACE } : { workspace: workspaceId(project.id), workspace_name: workspaceName(project.name) };
     const projectNote = project.id === PERSONAL_PROJECT_ID ? undefined : await localProjectNote(this.deps, project.id);
@@ -1525,7 +1563,8 @@ class CloudroomService {
       action === "rewind" && "replacement" in input ? input.replacement : input,
     );
     const customInstructions = resolveCustomInstructions({ threadId: thread.id, projectId: thread.projectId });
-    prepareCloudInstructionInput(prompt, customInstructions);
+    // The core's real limit is checked again on send.
+    prepareCloudInstructionInput(prompt, customInstructions, cloudPromptLimit(null));
     return { ...input, customInstructions };
   }
 
@@ -1618,7 +1657,7 @@ class CloudroomService {
     const stored = effectivePrompt(this.deps.db, thread.id, current.id, true);
     const revision = Number(stored.revision ?? 1);
     const expectedRevision = payload.expectedUpdatedAt - current.createdAt + 1;
-    const parsed = promptPayload(payload.input, thread.providerId, capabilities.attachments && (harnessProfile(capabilities, thread.providerId)?.attachments ?? true));
+    const parsed = promptPayload(payload.input, thread.providerId, capabilities.attachments && (harnessProfile(capabilities, thread.providerId)?.attachments ?? true), cloudPromptLimit(capabilities));
     const input = { target_request_id: queuedMessageId, expected_revision: expectedRevision, ...parsed,
       reasoning: stored.reasoning ?? saved.reasoning, service_tier: stored.service_tier ?? "default" };
     const id = `qe_${createHash("sha256").update(JSON.stringify([thread.id, input])).digest("hex").slice(0, 60)}`;
@@ -1709,7 +1748,7 @@ class CloudroomService {
     if (!saved?.sessionId) throw new ApiError(409, "cloudroom_missing_binding", "Cloud session is unavailable");
     const capabilities = await this.capabilities(await this.client(saved));
     if (!feature(capabilities, "rewind") || harnessProfile(capabilities, thread.providerId)?.rewind === false) throw new ApiError(409, "cloudroom_unsupported", "Cloud message editing is not enabled for this harness.");
-    const parsed = promptPayload(payload.input, thread.providerId, capabilities.attachments && (harnessProfile(capabilities, thread.providerId)?.attachments ?? true));
+    const parsed = promptPayload(payload.input, thread.providerId, capabilities.attachments && (harnessProfile(capabilities, thread.providerId)?.attachments ?? true), cloudPromptLimit(capabilities));
     const rewindId = `rewind_${payload.operationId}`;
     const promptId = `edit_${payload.operationId}`;
     const replacement = { request_id: promptId, ...parsed, reasoning: payload.reasoningLevel ?? saved.reasoning, service_tier: payload.serviceTier ?? "default" };
@@ -2019,7 +2058,7 @@ class CloudroomService {
             const attachments = capabilities.attachments
               ? await this.uploadAttachments(client, sessionId, pending.id, parsed.attachments ?? [], getThread(this.deps.db, threadId)?.projectId ?? "", capabilities.upload_parts)
               : [];
-            const enriched = prepareCloudInstructionInput({ text: parsed.text, content: cloudTextContent(parsed.content) }, parsed.customInstructions);
+            const enriched = prepareCloudInstructionInput({ text: parsed.text, content: cloudTextContent(parsed.content) }, parsed.customInstructions, cloudPromptLimit(capabilities));
             // A fork's first message is a native fork of the copied conversation (fork.ts).
             const fork = pending.id === `first_${threadId}` ? cloudForkOf(pending.input) : null;
             const child = pending.id === `first_${threadId}` && Boolean(JSON.parse(pending.input).code_from);
@@ -2027,7 +2066,7 @@ class CloudroomService {
             if (context === undefined) {
               const copying = pending.id === `first_${threadId}` && ["cloning", "uploading", "waiting"].includes(projectCopyProgress(this.deps.db, threadId)?.phase ?? "");
               const hint = fork ? FORK_HINT : child ? CHILD_HINT : copying ? "[Cloud workspace context]\nThis project is new on the VM. Cloudroom is copying its files into this folder right now: a GitHub clone or an upload from the user's Mac, plus uncommitted edits and .env files. Run `room-cli files wait` before you rely on them; it returns once they land, or says why they won't. Never recreate missing files or instructions such as AGENTS.md." : null;
-              context = hint && Buffer.byteLength(`${enriched.text}\n\n${hint}`, "utf8") <= 32768 ? hint : null;
+              context = hint && Buffer.byteLength(`${enriched.text}\n\n${hint}`, "utf8") <= cloudPromptLimit(capabilities) ? hint : null;
               this.deps.db.update(cloudroomCommands).set({ input: JSON.stringify({ ...JSON.parse(pending.input), workspaceContext: context }) }).where(eq(cloudroomCommands.id, pending.id)).run();
             }
             const text = context ? `${enriched.text}\n\n${context}` : enriched.text;
@@ -2048,7 +2087,7 @@ class CloudroomService {
               customInstructions: z.string().default(""),
             }).parse(JSON.parse(pending.input));
             requireClaudeSkillSupport(parsed.content, capabilities, harness);
-            const enriched = prepareCloudInstructionInput({ text: parsed.text, content: cloudTextContent(parsed.content) }, parsed.customInstructions);
+            const enriched = prepareCloudInstructionInput({ text: parsed.text, content: cloudTextContent(parsed.content) }, parsed.customInstructions, cloudPromptLimit(capabilities));
             const attachments = await this.uploadAttachments(client, sessionId, pending.id, parsed.attachments ?? [], getThread(this.deps.db, threadId)!.projectId, capabilities.upload_parts);
             accepted = await client.edit(sessionId, pending.id, parsed.target_request_id, parsed.expected_revision, enriched.text, {
               ...(enriched.content === undefined ? {} : { content: enriched.content as never }),
@@ -2062,7 +2101,7 @@ class CloudroomService {
             accepted = await client.reorder(sessionId, pending.id, z.object({ order: z.array(z.string()) }).parse(JSON.parse(pending.input)).order);
           } else if (pending.command === "steer") {
             const parsed = z.object({ target_request_id: z.string(), text: z.string(), customInstructions: z.string().default("") }).parse(JSON.parse(pending.input));
-            accepted = await client.steer(sessionId, pending.id, parsed.target_request_id, prepareCloudInstructionInput(parsed, parsed.customInstructions).text);
+            accepted = await client.steer(sessionId, pending.id, parsed.target_request_id, prepareCloudInstructionInput(parsed, parsed.customInstructions, cloudPromptLimit(capabilities)).text);
           } else if (pending.command === "compact") {
             accepted = await client.compact(sessionId, pending.id);
           } else if (pending.command === "goal") {
@@ -2070,7 +2109,7 @@ class CloudroomService {
           } else if (pending.command === "rewind") {
             const parsed = z.object({ before: z.string(), last_turn_id: z.string().optional(), customInstructions: z.string().default(""), replacement: z.object({ request_id: z.string(), text: z.string(), content: z.unknown().optional(), attachments: z.array(z.object({ name: z.string(), kind: z.enum(["image", "file"]), localPath: z.string().optional(), path: z.string().optional(), id: z.string().optional() })).optional(), reasoning: z.string().optional(), service_tier: z.string().optional() }) }).parse(JSON.parse(pending.input));
             requireClaudeSkillSupport(parsed.replacement.content, capabilities, harness);
-            const enriched = prepareCloudInstructionInput({ text: parsed.replacement.text, content: cloudTextContent(parsed.replacement.content) }, parsed.customInstructions);
+            const enriched = prepareCloudInstructionInput({ text: parsed.replacement.text, content: cloudTextContent(parsed.replacement.content) }, parsed.customInstructions, cloudPromptLimit(capabilities));
             const attachments = await this.uploadAttachments(client, sessionId, parsed.replacement.request_id, parsed.replacement.attachments ?? [], getThread(this.deps.db, threadId)!.projectId, capabilities.upload_parts);
             accepted = await client.rewind(sessionId, pending.id, parsed.before, parsed.last_turn_id, { ...parsed.replacement, ...enriched, content: enriched.content as never, attachments: attachments as never });
           } else if (pending.command === "stop" || pending.command === "resume" || pending.command === "sleep") {
@@ -2340,11 +2379,9 @@ class CloudroomService {
           if (record.kind === "secret_request") this.secrets.follow(client, saved.threadId, record);
           this.setConnectionIssue(saved.threadId, "replay");
           if (record.kind === "rewind") this.deps.hub.notifyThread(saved.threadId, ["history-rewritten"]);
-          // A full disk shows Free accounts the upgrade notice until space recovers (ADR 0206).
-          const data = record.data as Record<string, unknown> | undefined;
-          if (record.kind === "storage_pause" && data?.paused === true && data.reason === "disk_capacity") this.diskFull.add(saved.threadId);
-          if (record.kind === "storage_recovered") this.diskFull.delete(saved.threadId);
-          this.notify(saved.threadId, eventTypes, ["state", "receipt", "native_identity", "storage_pause", "storage_recovered"].includes(record.kind));
+          if (record.kind === "storage_recovered") this.disk.delete(saved.threadId);
+          if (record.kind === "storage_warning" || record.kind === "storage_pause") this.noteDisk(saved.threadId, client, record.data);
+          this.notify(saved.threadId, eventTypes, ["state", "receipt", "native_identity", "storage_warning", "storage_pause", "storage_recovered"].includes(record.kind));
         }
         if (!controller.signal.aborted) {
           const ended = new CloudroomConnectionError("Cloudroom event stream ended");

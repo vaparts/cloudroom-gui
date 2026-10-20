@@ -44,6 +44,13 @@ const usageSchema = z.discriminatedUnion("status", [
     status: z.literal("ok"),
     ...accountFields,
     windows: z.array(usageWindowSchema),
+    credits: z
+      .object({ detail: z.string().min(1).nullable() })
+      .nullable()
+      .default(null)
+      .describe(
+        "Set while requests bill paid usage credits at API prices instead of the plan; detail is spend or balance text.",
+      ),
   }),
   z.object({ status: z.literal("not_installed"), ...accountFields }),
   z.object({ status: z.literal("unauthenticated"), ...accountFields }),
@@ -141,6 +148,7 @@ export const accountViewsSchema = z.array(
     email: z.string().nullable(),
     plan: z.string().nullable(),
     inUse: z.boolean(),
+    credits: z.object({ detail: z.string().nullable() }).nullish(),
     windows: z.array(
       z.object({
         label: z.string(),

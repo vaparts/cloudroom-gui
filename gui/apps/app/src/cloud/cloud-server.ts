@@ -475,7 +475,7 @@ class CloudServer {
         error: null,
         reconnecting: false,
         usageLimit: false,
-        diskFull: false,
+        disk: null,
         pendingDelivery: 0,
         ...saved,
       });

@@ -59,6 +59,7 @@ export interface ExperimentalSidebarFooterRuntimeSnapshot {
     sequence: number;
     kind: ExperimentalSidebarFooterCommandKind;
   } | null;
+  alert: string | null;
 }
 
 export interface ExperimentalSidebarFooterItemRuntime {
@@ -115,6 +116,7 @@ class SidebarFooterItemRuntime implements ExperimentalSidebarFooterItemRuntime {
   private readonly listeners = new Set<() => void>();
   private snapshot: ExperimentalSidebarFooterRuntimeSnapshot = {
     command: null,
+    alert: null,
   };
 
   readonly subscribe = (listener: () => void): (() => void) => {
@@ -136,6 +138,12 @@ class SidebarFooterItemRuntime implements ExperimentalSidebarFooterItemRuntime {
       open: () => this.request("open"),
       close: () => this.request("close"),
       toggle: () => this.request("toggle"),
+      setAlert: (message: string | null) => {
+        const alert = message?.trim() || null;
+        if (alert === this.snapshot.alert) return;
+        this.snapshot = { ...this.snapshot, alert };
+        this.emit();
+      },
     });
   }
 

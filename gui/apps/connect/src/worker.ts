@@ -508,13 +508,18 @@ async function forward(
       return stub.fetch(new Request(doRequest, { headers }));
     },
   );
-  if (
-    response.status === 503 &&
-    response.headers.get(TUNNEL_OFFLINE_HEADER) === "1" &&
-    wantsHtml(request)
-  ) {
-    return offlinePage(server.lastSeenAt);
+  const offline = response.status === 503 && response.headers.get(TUNNEL_OFFLINE_HEADER) === "1";
+  if (response.status >= 502 && response.status <= 504) {
+    console.log({
+      event: "phone_request_failed",
+      mac: server.handle,
+      port: target,
+      path: new URL(request.url).pathname,
+      status: response.status,
+      reason: offline ? "mac offline" : response.status === 504 ? "timed out" : "mac error",
+    });
   }
+  if (offline && wantsHtml(request)) return offlinePage(server.lastSeenAt);
   return response;
 }
 

@@ -75,6 +75,7 @@ function normalizedUsage(
           resetsAt: window.resetsAt || null,
           cost: window.cost ?? null,
         })),
+        credits: usage.credits ?? null,
       };
     case "not_installed":
       return { status: "not_installed" };
@@ -220,12 +221,15 @@ export default function providerUsagePlugin(bb: BbPluginApi): void {
                 accountId: account.id,
                 inUse: account.inUse,
                 usage:
-                  windows.length === 0
+                  windows.length === 0 && !account.credits
                     ? null
                     : {
                         status: "ok",
                         accountEmail: account.email,
                         planLabel: account.plan,
+                        credits: account.credits
+                          ? { detail: account.credits.detail || null }
+                          : null,
                         windows: windows.map((window) => ({
                           label: window.label,
                           usedPercent: window.usedPercent,

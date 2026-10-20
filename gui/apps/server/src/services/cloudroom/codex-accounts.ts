@@ -22,10 +22,23 @@ type Remote = z.infer<typeof remoteSchema>;
 type Cached = Remote & { userId: string; at: number };
 type Window = { label: string; usedPercent: number; resetsAt: number | null };
 const usageWindowSchema = z.object({ used_percent: z.number(), reset_at: z.number().nullish(), limit_window_seconds: z.number().nullish() }).nullish();
-const usageSchema = z.object({ plan_type: z.string().nullish(), rate_limit: z.object({ primary_window: usageWindowSchema, secondary_window: usageWindowSchema }).nullish() });
+const usageSchema = z.object({
+  plan_type: z.string().nullish(),
+  rate_limit: z.object({ allowed: z.boolean().nullish(), limit_reached: z.boolean().nullish(), primary_window: usageWindowSchema, secondary_window: usageWindowSchema }).nullish(),
+  credits: z.object({ has_credits: z.boolean().nullish(), unlimited: z.boolean().nullish(), balance: z.union([z.string(), z.number()]).nullish() }).nullish().catch(null),
+});
+type Credits = { detail: string | null } | null;
+
+function creditsInUse(usage: z.infer<typeof usageSchema>, windows: Window[]): Credits {
+  const limited = usage.rate_limit?.limit_reached === true || windows.some(window => window.usedPercent >= 100);
+  if (!limited || usage.credits?.has_credits !== true || usage.credits.unlimited === true || usage.rate_limit?.allowed === false) return null;
+  const balance = usage.credits.balance;
+  if (balance == null || balance === "") return { detail: null };
+  return { detail: /^[\d.,]+$/u.test(String(balance)) ? `${balance} credits left` : `${balance} left` };
+}
 const tokensSchema = z.object({ access_token: z.string().min(1), refresh_token: z.string().min(1), id_token: z.string().min(1) });
 
-export type CodexAccountView = { id: string; name: string | null; email: string | null; plan: string | null; inUse: boolean; error: string | null; windows: Window[] };
+export type CodexAccountView = { id: string; name: string | null; email: string | null; plan: string | null; inUse: boolean; error: string | null; credits: Credits; windows: Window[] };
 export type CodexAccountsRequest =
   | { action: "list" }
   | { action: "start" }
@@ -56,7 +69,7 @@ async function postJson(url: string, body: Record<string, string>, form = false)
 export class CodexAccounts {
   private cached: Cached | null | undefined;
   private loading: Promise<Cached | null> | null = null;
-  private readonly usage = new Map<string, { windows: Window[]; error: string | null; at: number }>();
+  private readonly usage = new Map<string, { windows: Window[]; credits: Credits; error: string | null; at: number }>();
   private readonly signIns = new Map<string, { authId: string; userCode: string; expiresAt: number }>();
 
   constructor(
@@ -105,7 +118,7 @@ export class CodexAccounts {
         const measured = this.usage.get(account.id);
         return {
           id: account.id, name: account.name, email: account.email, plan: account.plan, inUse: account.id === state.selected,
-          error: account.error ?? measured?.error ?? null,
+          error: account.error ?? measured?.error ?? null, credits: measured?.credits ?? null,
           windows: (measured?.windows ?? []).map(window => window.resetsAt !== null && window.resetsAt <= Date.now() ? { ...window, usedPercent: 0, resetsAt: null } : window),
         };
       }),
@@ -154,9 +167,9 @@ export class CodexAccounts {
       const usage = usageSchema.parse(await response.json());
       const windows = ([["Primary limit", usage.rate_limit?.primary_window], ["Secondary limit", usage.rate_limit?.secondary_window]] as const)
         .flatMap(([fallback, window]) => window ? [{ label: label(window.limit_window_seconds, fallback), usedPercent: window.used_percent, resetsAt: window.reset_at ? window.reset_at < 1e12 ? window.reset_at * 1_000 : window.reset_at : null }] : []);
-      this.usage.set(account.id, { windows, error: null, at: Date.now() });
+      this.usage.set(account.id, { windows, credits: creditsInUse(usage, windows), error: null, at: Date.now() });
     } catch (error) {
-      this.usage.set(account.id, { windows: previous?.windows ?? [], error: error instanceof Error ? error.message : String(error), at: Date.now() });
+      this.usage.set(account.id, { windows: previous?.windows ?? [], credits: previous?.credits ?? null, error: error instanceof Error ? error.message : String(error), at: Date.now() });
     }
   }
 

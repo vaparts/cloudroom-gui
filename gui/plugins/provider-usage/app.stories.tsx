@@ -22,6 +22,7 @@ const claudeCodeLogoUrl = new URL(
 
 type ScenarioName =
   | "local"
+  | "credits"
   | "healthy"
   | "emptyPool"
   | "loading"
@@ -144,6 +145,22 @@ const scenarios: Record<Exclude<ScenarioName, "loading">, UsageSnapshot> = {
       ]),
     ],
   },
+  credits: {
+    machines: [
+      machine("host-mbp", "macbook", [
+        {
+          ...local("claude-code", 10, 100),
+          usage: {
+            ...(local("claude-code", 10, 100).usage as ProviderUsage & {
+              status: "ok";
+            }),
+            credits: { detail: "€29.57 / €300" },
+          },
+        },
+        local("codex", 12, 9),
+      ]),
+    ],
+  },
   healthy: { machines: [healthyMachine, healthyPool] },
   emptyPool: {
     machines: [
@@ -225,6 +242,7 @@ function FooterPreview({ scenario }: { scenario: ScenarioName }) {
 
 const descriptions: Record<ScenarioName, string> = {
   local: "Every local provider at once, with 5h and 7d limits.",
+  credits: "A plan at 100% now bills usage credits at API pricing.",
   healthy: "Multiple pooled accounts grouped by provider.",
   emptyPool: "Account Pooler is enabled and selectable but has no accounts.",
   loading: "The initial usage request has not completed.",
@@ -237,6 +255,7 @@ const descriptions: Record<ScenarioName, string> = {
 
 const storyRows: readonly { label: string; scenario: ScenarioName }[] = [
   { label: "local machine", scenario: "local" },
+  { label: "usage credits", scenario: "credits" },
   { label: "healthy", scenario: "healthy" },
   { label: "empty account pool", scenario: "emptyPool" },
   { label: "loading", scenario: "loading" },

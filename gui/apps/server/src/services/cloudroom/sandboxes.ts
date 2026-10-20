@@ -640,6 +640,7 @@ export class SandboxDirectory {
   agentLimited(thread: string): boolean { return this.capped.has(thread); }
 
   private plan: string | null = null;
+  currentPlan(): string | null { return this.plan; }
   private usage: { value: PlanUsage | null; next: number } | null = null;
   private checkingUsage = false;
   /** A Free or Pro account's usage; null for other plans, in the cloud queue, or before the website answers. Its plan is

@@ -1,5 +1,6 @@
 import { HTTPException } from "hono/http-exception";
 import type { ThreadEventScopeKind, ThreadEventType } from "@cloudroom/domain";
+import { CloudroomError } from "./services/cloudroom/client.js";
 import type { ServerLogger } from "./types.js";
 
 interface ApiErrorBody {
@@ -106,7 +107,7 @@ export function errorToResponse(
   return new Response(
     JSON.stringify({
       code: "internal_error",
-      message: "Internal server error",
+      message: error instanceof CloudroomError ? error.message : "Internal server error",
     }),
     {
       status: 500,

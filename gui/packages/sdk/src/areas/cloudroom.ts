@@ -122,8 +122,12 @@ export interface CloudAutomation {
   script?: string | null;
   /** A webhook loop's secret URL (ADR 0262), only in the answer that creates it: the website keeps just its hash. */
   url?: string;
+  /** A fresh-thread loop's own agent (app provider ID; null model is the agent's default). Null for same-thread loops,
+   *  which use their thread's, or until its settings are saved. Missing from older websites. */
+  agent?: { provider: string; model: string | null; reasoning: string | null } | null;
 }
-export type CloudAutomationFields = { name?: string; prompt?: string; cron?: string | null; timezone?: string; run_at?: string | null; enabled?: boolean; script?: string | null; new_thread?: boolean; webhook?: true };
+/** `harness` is Core's harness name or the app's provider ID; only fresh-thread loops pick an agent. */
+export type CloudAutomationFields = { name?: string; prompt?: string; cron?: string | null; timezone?: string; run_at?: string | null; enabled?: boolean; script?: string | null; new_thread?: boolean; webhook?: true; harness?: string; model?: string; reasoning?: string };
 /** Webhook events the website holds for one Local webhook loop on this Mac (ADR 0262). Ack the batch once its run starts. */
 export interface CloudHookBatch {
   local: string;
@@ -173,7 +177,7 @@ export type CodexAccountsInput =
   | { action: "remove"; id: string }
   | { action: "rename"; id: string; name: string }
   | { action: "move"; id: string; direction: "up" | "down" };
-export interface CodexAccountView { id: string; name: string | null; email: string | null; plan: string | null; inUse: boolean; error: string | null; windows: { label: string; usedPercent: number; resetsAt: number | null }[] }
+export interface CodexAccountView { id: string; name: string | null; email: string | null; plan: string | null; inUse: boolean; error: string | null; credits?: { detail: string | null } | null; windows: { label: string; usedPercent: number; resetsAt: number | null }[] }
 export type CodexAccountsResult =
   | { signedIn: boolean; accounts: CodexAccountView[] }
   | { sessionId: string; verificationUri: string; userCode: string; expiresAt: number }

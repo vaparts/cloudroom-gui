@@ -22,6 +22,7 @@ export const accountViewSchema = z.object({
   inUse: z.boolean(),
   limitedUntil: z.number().nullable(),
   error: z.string().nullable(),
+  credits: z.object({ detail: z.string().nullable() }).nullable(),
   windows: z.array(usageWindowSchema),
   // The Mac's own Claude login, shown but not selectable until it is signed in again.
   needsSignIn: z.boolean(),

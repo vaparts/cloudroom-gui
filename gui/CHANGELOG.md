@@ -2,6 +2,19 @@
 
 Also on [cloudroom.dev/changelog](https://www.cloudroom.dev/changelog).
 
+## 111
+
+Longer Cloud messages, calmer errors (2026-10-19)
+
+### Changes
+
+- Cloud messages can be up to 256 KB, up from 32 KB.
+- Cloud errors show the real reason in one calm line, and a full Cloud disk shows one live card instead of many chat rows.
+- Cloudroom warns you when Claude or Codex starts paying API prices from usage credits.
+- Loops keep the agent and model you pick, and Cloud Loops show it.
+- Code blocks keep their copy button in view while you scroll.
+- The phone app sees an offline Mac sooner, and Claude chat import no longer skips chats.
+
 ## 110
 
 New phone app and top-level threads (2026-10-18)

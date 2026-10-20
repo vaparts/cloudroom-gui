@@ -296,6 +296,7 @@ export function PluginSidebarFooterItems({
                     tooltip={{ children: label, hidden: false, side: "top" }}
                     className={cn(
                       SIDEBAR_FOOTER_ACTION_CLASS,
+                      "relative",
                       active &&
                         "bg-sidebar-accent text-sidebar-accent-foreground [&>[data-icon-root]]:opacity-100",
                     )}
@@ -417,15 +418,40 @@ function FooterCommandObserver({
 }
 
 export function FooterItemIcon({ item }: { item: FooterItem }) {
-  return item.kind === "plugin" &&
-    item.slot.source === "sidebarFooterAction" ? (
-    <PluginIcon pluginId={item.slot.pluginId} icon={item.icon} />
-  ) : (
-    <Icon
-      name={pluginIconName(item.icon)}
-      className="size-4 shrink-0"
-      aria-hidden="true"
-    />
+  return (
+    <>
+      {item.kind === "plugin" && item.slot.source === "sidebarFooterAction" ? (
+        <PluginIcon pluginId={item.slot.pluginId} icon={item.icon} />
+      ) : (
+        <Icon
+          name={pluginIconName(item.icon)}
+          className="size-4 shrink-0"
+          aria-hidden="true"
+        />
+      )}
+      {item.kind === "plugin" ? <FooterItemAlert item={item.slot} /> : null}
+    </>
+  );
+}
+
+function FooterItemAlert({ item }: { item: PluginSidebarFooterItemSlot }) {
+  const { alert } = useSyncExternalStore(
+    item.runtime.subscribe,
+    item.runtime.getSnapshot,
+    item.runtime.getSnapshot,
+  );
+  if (alert === null) return null;
+  return (
+    <>
+      <span
+        aria-hidden="true"
+        data-footer-alert=""
+        className="pointer-events-none absolute right-0.5 top-0.5 size-2.5 rounded-full bg-destructive ring-2 ring-sidebar"
+      />
+      <span role="status" className="sr-only">
+        {alert}
+      </span>
+    </>
   );
 }
 

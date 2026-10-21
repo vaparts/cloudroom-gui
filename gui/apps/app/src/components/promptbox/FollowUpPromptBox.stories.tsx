@@ -24,6 +24,7 @@ import {
 } from "@/components/promptbox/FollowUpPromptBox";
 import {
   getFollowUpPromptPlaceholder,
+  getFollowUpPromptPlaceholderHint,
   getCompactFollowUpPromptPlaceholder,
 } from "@/components/promptbox/follow-up-placeholder";
 import {
@@ -578,6 +579,10 @@ function Row({
   const resolvedCompactPlaceholder =
     promptPlaceholder ??
     getCompactFollowUpPromptPlaceholder(threadRuntimeDisplayStatus);
+  const resolvedPlaceholderHint =
+    promptPlaceholder === undefined
+      ? getFollowUpPromptPlaceholderHint(threadRuntimeDisplayStatus)
+      : undefined;
   const handleChangeMessage = (
     nextMessage: string,
     nextMentions: PromptTextMention[],
@@ -749,6 +754,7 @@ function Row({
                 onSubmit: noop,
                 compactPromptPlaceholder: resolvedCompactPlaceholder,
                 promptPlaceholder: resolvedPlaceholder,
+                promptPlaceholderHint: resolvedPlaceholderHint,
                 canModifierSubmit: submitMode.kind === "queue",
                 steerActiveThreadOnEnter: false,
                 submitMode,

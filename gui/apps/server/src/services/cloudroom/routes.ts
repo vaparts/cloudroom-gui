@@ -6,7 +6,7 @@ import { z } from "zod";
 import { threadGoalSetRequestSchema } from "@cloudroom/server-contract";
 import { cloudroom, isCloudThread } from "./commands.js";
 import { cloudroomAccount } from "./account.js";
-import { macAccess, macAccessLevels, setMacAccess } from "./previews.js";
+import { checkPreviewsNow, macAccess, macAccessLevels, setMacAccess } from "./previews.js";
 import { cloudSkills, copyLogins, setCloudSkills, setCopyLogins, skillInCloud } from "./sync.js";
 import { secondsSinceFirstLaunch } from "./setup-telemetry.js";
 import { teleports } from "./teleport.js";
@@ -396,6 +396,7 @@ export function installCloudroomRoutes(app: Hono, deps: AppDeps): void {
   app.get("/api/v1/cloudroom/account/github", async context => context.json(await githubAuth(deps)));
   app.get("/api/v1/cloudroom/account/github/account", async context => context.json(await githubAccount(deps)));
   app.post("/api/v1/cloudroom/account/github/disconnect", async context => { await disconnectGithub(deps); return context.json({ ok: true }); });
+  app.post("/api/v1/cloudroom/account/previews/check", async context => { await checkPreviewsNow(deps); return context.json({ ok: true }); });
   app.get("/api/v1/cloudroom/account/repo-suggestions", async context => context.json(await repoSuggestions(deps)));
   app.post("/api/v1/cloudroom/account/repo-suggestions/github", async context => {
     const input = z.object({ repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/) }).strict().parse(await context.req.json());
@@ -468,7 +469,7 @@ export function installCloudroomRoutes(app: Hono, deps: AppDeps): void {
     if (context.req.method === "POST" && ["/archive-all", "/unarchive"].includes(path)) return next();
     if (context.req.method === "DELETE" && path === "") return next();
     if (context.req.method === "POST" && ["/send", "/queued-messages", "/stop", "/compact", "/edit-message"].includes(path)) return next();
-    if (context.req.method === "PATCH" && /^\/queued-messages\/[^/]+$/.test(path)) return next();
+    if (context.req.method === "PATCH" && /^\/queued-messages\/[^/]+(\/order)?$/.test(path)) return next();
     if (context.req.method === "DELETE" && /^\/queued-messages\/[^/]+$/.test(path)) return next();
     if (context.req.method === "POST" && /^\/interactions\/[^/]+\/(respond|cancel)$/.test(path)) return next();
     if (context.req.method === "POST" && (path === "/goal" || path === "/goal/clear")) {

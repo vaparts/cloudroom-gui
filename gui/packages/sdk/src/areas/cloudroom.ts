@@ -26,7 +26,7 @@ export interface CloudroomStatus {
   model: string | null;
   error: string | null;
   sync?: { state: "synced" | "syncing" | "offline" | "conflict"; conflicts: number; issue: string | null } | null;
-  previews?: { state: "connected" | "offline"; count: number; message: string | null; issue: string | null } | null;
+  previews?: { state: "connected" | "offline"; count: number; message: string | null; issue: string | null; explained?: boolean } | null;
   /** Cloud agents may run commands on this computer (ADR 0113); null until first-run setup asks. */
   macAccess?: boolean | null;
   /** How much cloud agents may do on this computer (ADR 0186); null until first-run setup asks. */
@@ -39,6 +39,8 @@ export interface CloudroomStatus {
   signInError: string | null;
   /** The account's place in the cloud queue, or a blocked region: new Cloud threads wait. Null when it may start them. */
   cloudQueue?: { position: number; total: number; regionBlocked: boolean } | null;
+  /** The account's plan (free, pro, super, ultra) from the website's mode check; null while billing is off or unknown. */
+  plan?: string | null;
   /** A Free or Pro account's 30-day usage, for the sidebar upgrade card. Null for other plans or while in the cloud queue. */
   planUsage?: { plan: "free" | "pro"; agents: number; agentsLimit: number; cpuHours: number | null; cpuHoursLimit: number } | null;
 }
@@ -206,6 +208,7 @@ export interface CloudroomArea {
   githubAccount(signal?: AbortSignal): Promise<CloudroomGithubAccount | null>;
   /** Removes the cloud GitHub login and stops copying this Mac's `gh` login. */
   disconnectGithub(): Promise<void>;
+  checkPreviews(): Promise<void>;
   /** Recently updated repos on this Mac and GitHub that no project uses yet. */
   repoSuggestions(signal?: AbortSignal): Promise<{ githubConnected: boolean; repos: RepoSuggestion[] }>;
   /** Makes an `owner/name` GitHub repo a project right away. Machines and sandboxes clone it when first needed. */
@@ -340,6 +343,7 @@ export function createCloudroomArea({ transport }: CreateSdkAreaArgs): Cloudroom
     cancelGithubLogin: (requestId) => transport.readJson(request("/github/cancel", { requestId })) as Promise<CloudroomCodexAuth>,
     githubAccount: (signal) => transport.readJson(request("/github/account", undefined, signal)) as Promise<CloudroomGithubAccount | null>,
     disconnectGithub: () => transport.readVoid(request("/github/disconnect", {})),
+    checkPreviews: () => transport.readVoid(request("/previews/check", {})),
     status: (signal) => transport.readJson(request("", undefined, signal)) as Promise<CloudroomStatus>,
     signIn: (input = {}) => transport.readJson(request("/sign-in", input)) as Promise<{ url: string }>,
     connect: (input) => transport.readVoid(transport.fetch(`${transport.baseUrl}/api/v1/cloudroom`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) })),

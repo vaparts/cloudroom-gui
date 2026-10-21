@@ -201,11 +201,11 @@ describe("room-cli thread fork command output", () => {
     });
   });
 
-  it("does not offer a host selector", async () => {
+  it("offers only a local or cloud machine choice", async () => {
     const help = await getHelpOutput(["thread", "fork"], register);
 
     expect(help).toContain("personal or worktree");
     expect(help).not.toContain("--host");
-    expect(help).not.toContain("--machine");
+    expect(help).toContain("--machine <target>");
   });
 });

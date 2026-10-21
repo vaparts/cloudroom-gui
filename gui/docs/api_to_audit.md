@@ -3048,11 +3048,20 @@ stabilizing this API. Exposed as `bb machine reconcile`.
 **What it does.** Hides a thread panel action from the side panel launcher
 when the thread cannot be forked: its provider does not support forks, or the
 thread is archived or has no environment. A message action hides wherever the
-timeline offers no Fork button. Side chat uses both so Cursor threads never
-offer a side chat that fails.
+timeline offers no Fork button. Side chats start fresh (ADR 0273), so they no
+longer use it.
 
-**Audit before stabilizing.** One consumer. Decide whether a general
-availability predicate should replace this single capability flag.
+**Audit before stabilizing.** No consumers. Decide whether a general
+availability predicate should replace this flag, or remove it.
+
+## `ForkThreadRequest.fresh`
+
+**What it does.** `threads.fork({ fresh: true })` starts a hidden side chat as
+a new agent in the source's folder or sandbox, with no copied conversation and
+no fork point (ADR 0273). Any provider. The side-chat plugin is the only user.
+
+**Audit before stabilizing.** Decide whether this belongs on `fork` or on a
+dedicated side-chat create call.
 
 ## `bb.experimental_telemetry.capture`
 

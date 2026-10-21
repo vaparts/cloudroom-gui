@@ -1007,6 +1007,11 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
     openPluginPanel,
     threadId,
   });
+  const sideChatAction = pluginPanelActions.find(
+    (action) =>
+      action.id ===
+      `plugin-action:${SIDE_CHAT_PLUGIN_ID}:${SIDE_CHAT_PLUGIN_PANEL_ACTION_ID}`,
+  );
   const dismissCompactKeyboard = useCallback(() => {
     if (!renderSecondaryPanelAsDrawer) {
       return;
@@ -2589,6 +2594,7 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
       isSecondaryPanelOpen={isSecondaryPanelOpen}
       onClosePane={onRequestClose ?? undefined}
       onToggleSecondaryPanel={toggleSecondaryPanel}
+      onStartSideChat={isSideChatThread ? undefined : sideChatAction?.onSelect}
       pluginActions={
         <PluginThreadHeaderActions
           threadId={thread.id}

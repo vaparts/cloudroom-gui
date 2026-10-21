@@ -8,6 +8,7 @@ import type { EnvironmentArgs } from "@cloudroom/server-contract";
 import { action } from "../../action.js";
 import { createCliBbSdk } from "../../client.js";
 import { resolveExplicitIdFlag } from "../../context-env.js";
+import { resolveLocalHostId } from "../../daemon.js";
 import { collectOption, outputJson, prependErrorContext } from "../helpers.js";
 import {
   buildPromptInputs,
@@ -28,6 +29,7 @@ interface ThreadForkCommandOptions {
   file?: string[];
   image?: string[];
   json?: boolean;
+  machine?: string;
   newEnvironment?: string;
   permissionMode?: string;
   prompt?: string;
@@ -67,6 +69,7 @@ async function resolveForkSourceHostId(
   sourceThreadId: string,
 ): Promise<string> {
   const sourceThread = await sdk.threads.get({ threadId: sourceThreadId });
+  if (sourceThread.executionTarget === "cloud") return resolveLocalHostId();
   if (sourceThread.environmentId === null) {
     throw new Error("Source thread has no environment.");
   }
@@ -100,6 +103,10 @@ export function registerForkCommand(
     .option(
       "--source-seq-end <seq>",
       "Fork after the source turn containing this event sequence",
+    )
+    .option(
+      "--machine <target>",
+      "local or cloud; omit to fork where the source runs (Local when environment flags are set)",
     )
     .option(
       "--environment <id-or-path>",
@@ -152,6 +159,23 @@ export function registerForkCommand(
           const environmentValue = resolveSpawnEnvironmentValue(
             opts.environment,
           );
+          if (
+            opts.machine !== undefined &&
+            opts.machine !== "local" &&
+            opts.machine !== "cloud"
+          ) {
+            throw new Error("--machine must be local or cloud.");
+          }
+          if (
+            opts.machine === "cloud" &&
+            (environmentValue !== undefined ||
+              opts.newEnvironment !== undefined ||
+              opts.baseBranch !== undefined)
+          ) {
+            throw new Error(
+              "A Cloud fork runs in a new sandbox with its source's code; environment flags cannot be combined with --machine cloud.",
+            );
+          }
 
           let thread: Thread;
           let environment: EnvironmentArgs | undefined;
@@ -205,6 +229,9 @@ export function registerForkCommand(
               sourceThreadId,
               origin: "cli",
               ...(environment === undefined ? {} : { environment }),
+              ...(opts.machine === "local" || opts.machine === "cloud"
+                ? { executionTarget: opts.machine }
+                : {}),
               ...(input === undefined ? {} : { input }),
               ...(sourceSeqEnd === undefined ? {} : { sourceSeqEnd }),
               ...(opts.title === undefined ? {} : { title: opts.title }),
@@ -234,7 +261,9 @@ export function registerForkCommand(
           console.log(`Thread forked: ${thread.id}`);
           console.log(`Source: ${sourceThreadId}`);
           console.log(`Status: ${thread.status}`);
-          console.log(`Environment: ${describeForkEnvironment(environment)}`);
+          console.log(
+            `Environment: ${thread.executionTarget === "cloud" ? "new cloud sandbox" : describeForkEnvironment(environment)}`,
+          );
           if (thread.visibility === "hidden") {
             console.log("Visibility: hidden");
           }

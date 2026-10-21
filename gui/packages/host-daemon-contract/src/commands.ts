@@ -365,6 +365,7 @@ const threadTeleportCommandSchema = hostDaemonThreadWorkspaceTargetSchema.extend
   sessions: z.array(z.object({ threadId: z.string().regex(/^[a-zA-Z0-9_-]+$/), nativeId: z.string().regex(/^[a-zA-Z0-9_-]+$/), harness: z.enum(["codex", "pi", "claude-code", "cursor", "opencode"]) })).optional(),
   file: z.string().optional(),
   attachments: z.array(z.string()).optional(),
+  keepImages: z.boolean().optional(),
   extraText: z.string().max(HOST_ARTIFACT_MAX_BYTES).optional(),
   index: z.number().int().nonnegative().optional(),
   offset: z.number().int().nonnegative().optional(),

@@ -107,6 +107,7 @@ Forking:
 
     --prompt <prompt>              Optional first prompt; omit for an idle fork
     --source-seq-end <seq>         Fork after the source turn containing this event sequence (tip by default)
+    --machine <target>             local or cloud; default: the source's side (Local with environment flags)
     --environment <id-or-path>     Existing environment ID or unmanaged workspace path
     --new-environment <kind>       Create a fresh personal workspace or managed worktree
     --base-branch <branch>         Exact Git ref for a new worktree; omit for the project default
@@ -117,7 +118,8 @@ Forking:
     --file <path>                  CLI-local absolute path, file: URL, or uploaded file path
     --image <path>                 CLI-local absolute path, file: URL, or uploaded image path
 
-  Forks clone the source provider session on the same machine and inherit the
+  Forks clone the source provider session on the same side (or the other with
+  --machine; Claude Code and Codex) and inherit the
   source conversation in their timeline. --source-seq-end anchors the fork on
   the completed source turn that contains that sequence: the clone and the
   inherited timeline both end with that turn (an anchor on a user message
@@ -127,9 +129,12 @@ Forking:
   source environment by default. Use --new-environment personal for a fresh
   personal workspace or --new-environment worktree for a fresh worktree on the
   source machine; --environment can select another environment or unmanaged
-  path on that machine. A different machine is rejected because the source
-  provider session lives on its original machine. Omit --prompt to create an
-  idle fork.
+  path on that machine. Another native machine is rejected because the source
+  provider session lives on its original machine; --machine local|cloud copies
+  it across instead. Omit --prompt to create an
+  idle fork. To fork into another harness, Local or Cloud, use thread spawn
+  with --origin-kind fork --source-thread ID --provider P --model M: the fork
+  gets the conversation as hidden text instead of a native clone.
 
 Editing a sent message:
 

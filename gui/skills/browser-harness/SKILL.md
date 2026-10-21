@@ -26,6 +26,7 @@ Before your first browser task, read the full guide: `browser-harness skill`. It
   - The side-panel browser runs on the user's Mac. You can't use it or its logins.
   - If a site needs the user's login, say so. Ask before using their Mac's browser.
   - With their OK, pipe the same script to `room-cli mac run --write --stdin 'browser-harness'`. Their browser may ask them to click Allow once; tell them.
+  - When you're done, close the tabs you opened with `close_tab()`. An open page keeps drawing on the CPU and uses the user's plan hours.
 
 ## Rules
 

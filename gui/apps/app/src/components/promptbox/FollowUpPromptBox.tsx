@@ -133,6 +133,7 @@ export interface FollowUpComposerProps {
   submitTitle?: string;
   compactPromptPlaceholder: string;
   promptPlaceholder: string;
+  promptPlaceholderHint?: string;
   canModifierSubmit: boolean;
   steerActiveThreadOnEnter: boolean;
   submitMode: FollowUpSubmitMode;
@@ -682,6 +683,9 @@ function FollowUpPromptBoxWithComposer({
           isCompactViewport
             ? composer.compactPromptPlaceholder
             : composer.promptPlaceholder
+        }
+        placeholderHint={
+          isCompactViewport ? undefined : composer.promptPlaceholderHint
         }
         containerCompactPlaceholder={composer.compactPromptPlaceholder}
         heightAnimationKey={isInteractionExpanded ? "expanded" : "compact"}

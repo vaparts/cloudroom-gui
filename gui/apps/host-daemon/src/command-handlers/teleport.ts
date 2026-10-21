@@ -326,6 +326,12 @@ async function runCapture(
       cursor || exported
         ? []
         : (await readFile(source, "utf8")).trimEnd().split("\n");
+    if (lines.length > 1)
+      try {
+        JSON.parse(lines.at(-1)!);
+      } catch {
+        lines.pop();
+      }
     const header = cursor || exported ? {} : JSON.parse(lines[0]!);
     const id = exported
       ? exported.info?.id
@@ -459,7 +465,7 @@ async function runCapture(
                   });
                 }
               }
-              const separated = separateImages(record);
+              const separated = command.keepImages ? record : separateImages(record);
               collectText(
                 spoken(session.harness, separated as Record<string, any>),
                 texts,

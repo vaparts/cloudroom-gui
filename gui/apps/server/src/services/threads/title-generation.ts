@@ -55,6 +55,8 @@ interface RawGeneratedThreadMetadata {
 export function cleanPromptText(input: PromptInput[]): string {
   return input
     .filter((part) => part.type === "text")
+    // Hidden notes for the agent (like a fork's "[Local fork]" note) never name a thread.
+    .filter((part) => part.visibility !== "agent-only")
     .map((part) => part.text.trim())
     .join(" ")
     .replace(/\s+/gu, " ")

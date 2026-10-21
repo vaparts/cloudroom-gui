@@ -22,16 +22,23 @@ export async function noteWake(deps: Deps, thread: string): Promise<void> {
     await appendFile(join(folder(deps), "own-threads"), thread + "\n", { mode: 0o600 });
     noted.add(thread);
   }
-  await writeFile(join(folder(deps), "woke"), "");
+  await checkPreviewsNow(deps);
 }
-const statusSchema = z.object({ state: z.enum(["connected", "offline"]), count: z.number().int().nonnegative().optional(), message: z.string().max(512).optional(), checkedAt: z.number() });
+
+export async function checkPreviewsNow(deps: Deps): Promise<void> {
+  await writeFile(join(folder(deps), "woke"), "").catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== "ENOENT") throw error;
+  });
+}
+const statusSchema = z.object({ state: z.enum(["connected", "offline"]), count: z.number().int().nonnegative().optional(), message: z.string().max(512).optional(), detail: z.string().max(512).optional(), checkedAt: z.number() });
 
 export async function previewStatus(deps: Deps) {
   try {
     const status = statusSchema.parse(JSON.parse(await readFile(join(folder(deps), "status.json"), "utf8")));
     const age = Date.now() - status.checkedAt;
-    return { state: age >= -5000 && age <= 15_000 ? status.state : "offline", count: status.count ?? 0, message: status.message ?? null };
-  } catch { return { state: "offline", count: 0, message: null }; }
+    const fresh = age >= -5000 && age <= 15_000;
+    return { state: fresh ? status.state : "offline", count: status.count ?? 0, message: status.message ?? null, detail: fresh ? status.detail ?? null : null };
+  } catch { return { state: "offline", count: 0, message: null, detail: null }; }
 }
 
 /** How much cloud agents may do on this computer (ADR 0113, levels in ADR 0186), or null until first-run setup asks. The preview helper runs Mac access. */

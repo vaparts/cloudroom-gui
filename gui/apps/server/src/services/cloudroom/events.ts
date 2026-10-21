@@ -91,7 +91,7 @@ function appendPrompt(tx: DbTransaction, saved: Binding, request: Command): void
 export function projectInitialPrompt(tx: DbTransaction, threadId: string): boolean {
   const saved = binding(tx, threadId);
   const request = command(tx, `first_${threadId}`);
-  if (!saved || !request || saved.turnId ||
+  if (!saved || !request || request.command !== "prompt" || saved.turnId ||
       !(request.state === "sending" || request.state === "accepted" || (request.state === "failed" && !saved.sessionId)) ||
       requestedTurns(tx, threadId).has(bbRequestId(request.id))) return false;
   appendPrompt(tx, saved, request);

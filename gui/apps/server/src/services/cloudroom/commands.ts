@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { readFile, writeFile, mkdir, stat, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { and, desc, eq, inArray, isNull, notInArray } from "drizzle-orm";
-import { createThread, getAppSettings, getProject, getThread, getThreadExecutionOverride, setThreadExecutionOverride, updateThread, cloudroomThreads, cloudroomCommands, events, threads, type DbConnection, type DbQueryConnection, type DbTransaction } from "@cloudroom/db";
+import { createThread, findLastCompletedRootStoredTurn, getAppSettings, getProject, getThread, getThreadExecutionOverride, setThreadExecutionOverride, updateThread, cloudroomThreads, cloudroomCommands, events, threads, type DbConnection, type DbQueryConnection, type DbTransaction } from "@cloudroom/db";
 import { PERSONAL_PROJECT_ID, encodeClientTurnRequestIdNumber, isStandaloneBuiltinCompactCommand, promptInputSchema, reasoningLevelSchema, threadQueuedMessageSchema, type Thread, type PromptInput, type ThreadEventType, type ThreadEventTurnStatus, type ThreadChangeKind, type ReasoningLevel } from "@cloudroom/domain";
 import type { CreateThreadRequest, ForkThreadRequest, SendMessageRequest, SendMessageResponse } from "@cloudroom/server-contract";
 import { z } from "zod";
@@ -16,16 +16,16 @@ import { buildThreadStatusChangeMetadata } from "../threads/thread-runtime-displ
 import { cloudroomSystemPrompt, prepareCloudInstructionInput, resolveCustomInstructions } from "../threads/custom-instructions.js";
 import { binding, bindings, command, commands, coreInUse, queuedPrompts, saveBinding, saveCommandState, saveStatus, effectivePrompt, projectCopyProgress, stampBindings, teleportBlocked, unstartedTurn, type Binding, type Command } from "./store.js";
 import { copyProject, githubRepository, localProjectNote, planProjectCopy, writeFilesState, type ProjectCopyJob } from "./project-copy.js";
-import { CHILD_HINT, cloudForkOf, cloudForkPoint, FORK_HARNESSES, FORK_HINT, landForkCode, startCloudFork, threadCode } from "./fork.js";
+import { CHILD_HINT, cloudForkOf, cloudForkPoint, FORK_HARNESSES, FORK_HINT, landForkCode, localForkPoint, startCloudFork, threadCode } from "./fork.js";
 import { copyForkSourceHistory } from "../threads/thread-fork-history.js";
-import { appendClientTurnEvent } from "../threads/thread-events.js";
+import { appendClientTurnEvent, getLastExecutionOptions } from "../threads/thread-events.js";
 import { getLeadingAgentOnlyInput, resolveDeferredFirstTurnContext } from "../threads/deferred-first-turn-context.js";
 import { deriveTitleFallback, shouldGenerateThreadTitle } from "../threads/title-generation.js";
 import { buildSuggestedBranchName } from "../threads/thread-create-helpers.js";
 import { assertValidParentThread, isParentNotifiableChildThread } from "../threads/thread-parent.js";
 import { inferThreadMetadata, queueThreadTitle } from "../threads/thread-metadata-inference.js";
 import { getLastThreadOutput } from "../threads/thread-data.js";
-import { cliPlace, reportAgentConnect } from "./setup-telemetry.js";
+import { cliPlace, reportAgentConnect, reportMacHelperProblem } from "./setup-telemetry.js";
 import { cloudSkills, copyLogins, copyMacGithub, importCodexLogin, importPiLogin, macPiSetup, setupSync, skillInCloud, stopSync, syncStatus } from "./sync.js";
 import { noteWake, setupPreviews, stopPreviews, previewStatus } from "./previews.js";
 import { CloudSecrets } from "./secrets.js";
@@ -91,6 +91,7 @@ const capabilitiesSchema = z.object({
   rewind: z.boolean().default(false),
   fork: z.boolean().default(false),
   side_chat: z.boolean().default(false),
+  side_chat_fresh: z.boolean().default(false),
   attachments: z.boolean().default(false),
   upload_parts: z.boolean().default(false),
   compact: z.boolean().default(false),
@@ -349,9 +350,15 @@ const retiredVmMessage = "This thread ran on the old shared cloud VM, which was 
 type ConnectionPhase = "delivery" | "stream" | "replay";
 type ConnectionIssue = { message: string; reconnecting: boolean };
 
+const AGENT_FORKS = "cloudroom-agent-forks.json";
+const CHILD_REPORTS = "cloudroom-child-reports.json";
+const childReportSchema = z.object({ child: z.string(), status: z.string(), turn: z.string() });
+const AGENT_FORK_WAIT = 90_000;
+
 class CloudroomService {
   teleportRecovery?: () => void;
   archiveRequest?: (threadId: string) => void;
+  private readonly heldStarts = new Set<string>();
   childTurnEnded?: (child: Thread & { parentThreadId: string }, status: ThreadEventTurnStatus) => void;
   teleportUrl = "";
   async teleportClient(threadId?: string): Promise<CloudroomClient> {
@@ -401,6 +408,8 @@ class CloudroomService {
   private stopped = false;
   private epoch = 0;
   private configurationWrite: Promise<void> = Promise.resolve();
+  private readonly recordWrites = new Map<string, Promise<void>>();
+  private delivering?: Promise<void>;
   private syncIssue: string | null = null;
   private previewIssue: string | null = null;
   private previewSetupEpoch = -1;
@@ -799,6 +808,12 @@ class CloudroomService {
     } finally { this.reportingOnboarding = false; }
   }
 
+  private async previews() {
+    const { detail, ...status } = await previewStatus(this.deps);
+    if (status.state === "offline" && detail) reportMacHelperProblem(detail);
+    return { ...status, explained: Boolean(detail), issue: this.previewIssue };
+  }
+
   private ensurePreviews(capabilities: Capabilities): Promise<void> | undefined {
     if (!capabilities.previews || this.stopped || this.previewSetupEpoch === this.epoch || Date.now() < this.previewRetryAt) return;
     const epoch = this.epoch;
@@ -835,13 +850,13 @@ class CloudroomService {
         if (capabilities) void this.ensurePreviews(capabilities);
         return {
           ready: true, account: saved.account, projectId, storage: null, harnesses: capabilities?.harnesses ?? null, sync: null,
-          previews: capabilities?.previews ? { ...await previewStatus(this.deps), issue: this.previewIssue } : null,
+          previews: capabilities?.previews ? await this.previews() : null,
           workspaces: true, teleport: capabilities?.teleport ?? false, repository: null,
           model: capabilities?.harnesses.find((h) => h.id === "codex")?.model ?? null,
           steer: capabilities?.steer ?? false, rewind: capabilities?.rewind ?? false, attachments: capabilities?.attachments ?? false,
           compact: capabilities?.compact ?? false, queue_edit: capabilities?.queue_edit ?? false, queue_cancel: capabilities?.queue_cancel ?? false,
           queue_reorder: capabilities?.queue_reorder ?? false, error: null, cloudQueue: this.sandboxes.cloudQueue(),
-          planUsage: this.sandboxes.planUsage(),
+          plan: this.sandboxes.currentPlan(), planUsage: this.sandboxes.planUsage(),
         };
       }
       const connection = await this.connection();
@@ -854,7 +869,7 @@ class CloudroomService {
       return {
         ready: true, account, selfHosted, projectId, storage, harnesses: capabilities.harnesses,
         sync: capabilities.sync ? { ...await syncStatus(this.deps), issue: this.syncIssue } : null,
-        previews: capabilities.previews ? { ...await previewStatus(this.deps), issue: this.previewIssue } : null,
+        previews: capabilities.previews ? await this.previews() : null,
         workspaces: capabilities.workspaces, teleport: capabilities.teleport, repository: capabilities.repository,
         model: capabilities.harnesses.find((h) => h.id === "codex")?.model ?? null,
         steer: capabilities.steer, rewind: capabilities.rewind, attachments: capabilities.attachments,
@@ -1083,6 +1098,12 @@ class CloudroomService {
     setThreadExecutionOverride(this.deps.db, { threadId: thread.id, reasoningLevelOverride: reasoningLevel });
   }
 
+  private async queueCapabilities(saved: Binding): Promise<Capabilities> {
+    await this.requireOwnThread(saved);
+    const known = sandboxThread(saved.coreUrl) ? await this.savedCapabilities() : this.lastCapabilities;
+    return known ?? await this.liveCapabilities(saved);
+  }
+
   private async liveCapabilities(saved: Binding): Promise<Capabilities> {
     try { return await this.capabilities(await this.client(saved)); }
     catch (error) {
@@ -1140,19 +1161,19 @@ class CloudroomService {
     return { authRequired: !saved.sessionId && authRequiredMessages.has(saved.error ?? ""), starting: !saved.queuePaused && Boolean(initial && ["sending", "accepted"].includes(initial.state)), sessionId: saved.sessionId, paused: saved.queuePaused, failedStart: !saved.sessionId && initial?.state === "failed", model: saved.model, reasoning, serviceTier, error: saved.error ?? issues.find(issue => !issue.reconnecting)?.message ?? null, reconnecting: issues.some(issue => issue.reconnecting), usageLimit: Boolean(sandboxThread(saved.coreUrl)) && (this.sandboxes.usageLimited() || this.sandboxes.agentLimited(sandboxThread(saved.coreUrl) ?? "")), disk: this.diskStatus(threadId, saved), pendingDelivery: commands(this.deps.db, threadId).filter((c) => c.state === "sending").length };
   }
 
-  async create(request: CreateThreadRequest, awaitingCore = false): Promise<Thread> {
-    if (request.originKind === "fork" && request.sourceThreadId) return this.createFork(request, request.sourceThreadId);
+  async create(request: CreateThreadRequest, awaitingCore = false, fork?: { sourceThreadId: string; endSequence: number }): Promise<Thread> {
+    if (request.originKind === "fork" && request.sourceThreadId && !fork) return this.createFork(request, request.sourceThreadId);
     const parentId = request.originKind || request.sourceThreadId ? undefined : request.parentThreadId;
     const parent = parentId ? getThread(this.deps.db, parentId) : null;
     // A Cloud parent's child gets a sandbox of its own with a copy of the parent's code (ADR 0229).
-    const codeFrom = parent && isCloudThread(parent) ? parent.id : undefined;
+    const codeFrom = parent && isCloudThread(parent) ? parent.id : fork?.sourceThreadId;
     if (parent && codeFrom && request.projectId !== parent.projectId) throw new ApiError(400, "cloudroom_unsupported", "A child thread belongs to its parent's project.");
     if (parentId) assertValidParentThread(this.deps, { parentThreadId: parentId, cloudChild: Boolean(codeFrom) });
     const sandbox = await this.newThreadsInSandboxes();
     const connection = sandbox ? null : await this.connection();
     const project = getProject(this.deps.db, request.projectId);
     if (!project) throw new ApiError(404, "project_not_found", "Project not found");
-    if (!isCloudProvider(request.providerId) || request.originKind || request.sourceThreadId || request.sendAt || request.pluginSubmission || (request.environment.type !== "project-default" && !codeFrom))
+    if (!isCloudProvider(request.providerId) || (!fork && (request.originKind || request.sourceThreadId)) || request.sendAt || request.pluginSubmission || (request.environment.type !== "project-default" && !codeFrom))
       throw new ApiError(400, "cloudroom_unsupported", "Cloud supports new Codex, Pi, Cursor, fx, opencode, Hermes Agent, Devin, OpenClaw and Claude Code threads in a cloud folder. Forks, scheduling and native machine targets are not supported.");
     if (request.permissionMode && request.permissionMode !== "full") throw new ApiError(400, "cloudroom_unsupported", "Cloud uses the full permission mode; restricted modes are not supported.");
     if (request.startedOnBehalfOf || request.sourceSeqEnd !== undefined) throw new ApiError(400, "cloudroom_unsupported", "Cloud continuation and delegated starts are not enabled.");
@@ -1194,13 +1215,17 @@ class CloudroomService {
     const workspace = project.id === PERSONAL_PROJECT_ID ? { workspace: ROOT_WORKSPACE } : { workspace: workspaceId(project.id), workspace_name: workspaceName(project.name) };
     const providerId = request.providerId;
     const projectNote = project.id === PERSONAL_PROJECT_ID ? undefined : await localProjectNote(this.deps, project.id);
+    let created = false;
+    const titleInput = request.input.filter(part => part.visibility !== "agent-only");
     const thread = this.deps.db.transaction((tx) => {
       const previous = existingThread(tx);
       if (previous) return previous;
       if (parentId) assertValidParentThread(this.deps, { parentThreadId: parentId, cloudChild: Boolean(codeFrom) });
+      created = true;
       const thread = createThread(tx, this.deps.hub, {
         executionTarget: "cloud", projectId: request.projectId, providerId, status: "pending", parentThreadId: parentId ?? null,
-        title: request.title, titleFallback: deriveTitleFallback(request.input), sectionId: request.sectionId, visibility: request.visibility,
+        ...(fork ? { originKind: "fork" as const, sourceThreadId: fork.sourceThreadId } : {}),
+        title: request.title, titleFallback: deriveTitleFallback(titleInput), sectionId: request.sectionId, visibility: request.visibility,
         originPluginId: request.originPluginId,
         pluginMetadata: request.pluginMetadata && request.originPluginId ? { pluginId: request.originPluginId, metadata: request.pluginMetadata } : null,
       });
@@ -1215,21 +1240,30 @@ class CloudroomService {
           ...(request.serviceTier && request.serviceTier !== "default" ? { service_tier: request.serviceTier } : {}),
           ...(request.baseBranch ? { base_branch: request.baseBranch } : {}),
           ...(codeFrom ? { code_from: codeFrom } : {}),
-          ...(awaitingCore ? { awaiting_core: true } : {}),
+          ...(awaitingCore || this.heldStarts.has(request.requestId ?? "") ? { awaiting_core: true } : {}),
         })),
         createdAt: Date.now(),
       }).run();
-      projectInitialPrompt(tx, thread.id);
-      appendStartProgress(tx, thread.id, [cloudStep(Boolean(sandbox))], "active", true);
-      queueThreadTitle(tx, thread.id, request.input);
-      if (!request.title && shouldGenerateThreadTitle(request.input)) {
+      if (!fork) {
+        projectInitialPrompt(tx, thread.id);
+        appendStartProgress(tx, thread.id, [cloudStep(Boolean(sandbox))], "active", true);
+      }
+      queueThreadTitle(tx, thread.id, titleInput);
+      if (!request.title && shouldGenerateThreadTitle(titleInput)) {
         tx.insert(cloudroomCommands).values({
           id: `title_${thread.id}`, threadId: thread.id, command: "title",
-          input: JSON.stringify({ input: request.input }), createdAt: Date.now(),
+          input: JSON.stringify({ input: titleInput }), createdAt: Date.now(),
         }).run();
       }
       return thread;
     });
+    if (fork && created) {
+      copyForkSourceHistory(this.deps, { fork: thread, history: { kind: "thread", sourceThreadId: fork.sourceThreadId, endSequence: fork.endSequence } });
+      this.deps.db.transaction((tx) => {
+        projectInitialPrompt(tx, thread.id);
+        appendStartProgress(tx, thread.id, [cloudStep(Boolean(sandbox))], "active", true);
+      });
+    }
     this.notify(thread.id, ["client/turn/requested", "system/thread-provisioning"]);
     void this.selectOnboardingProject(project.id).catch(() => {});
     this.start();
@@ -1241,9 +1275,12 @@ class CloudroomService {
   private async createFork(request: CreateThreadRequest, sourceId: string): Promise<Thread> {
     const source = getThread(this.deps.db, sourceId);
     const saved = binding(this.deps.db, sourceId);
-    if (!source || !isCloudThread(source) || !saved?.sessionId || source.archivedAt || source.deletedAt) throw new ApiError(409, "fork_source_unavailable", "Only a started, unarchived Cloud thread can be forked.");
+    if (!source || source.archivedAt || source.deletedAt || (isCloudThread(source) ? !saved?.sessionId : !source.environmentId)) throw new ApiError(409, "fork_source_unavailable", "Only a started, unarchived thread can be forked.");
     if (!FORK_HARNESSES.includes(source.providerId)) throw new ApiError(400, "cloudroom_unsupported", "Cloud forks support Claude Code and Codex.");
-    if ((request.providerId && request.providerId !== source.providerId) || (request.model && request.model !== saved.model)) throw new ApiError(400, "cloudroom_unsupported", "A Cloud fork keeps its source's harness and model.");
+    const last = saved ? null : getLastExecutionOptions(this.deps, source.id);
+    const model = saved?.model ?? last?.model;
+    if (!model) throw new ApiError(409, "fork_source_unavailable", "The source thread has no model to fork with yet.");
+    if ((request.providerId && request.providerId !== source.providerId) || (request.model && request.model !== model)) throw new ApiError(400, "cloudroom_unsupported", "A Cloud fork keeps its source's harness and model.");
     if (request.sendAt || request.pluginSubmission) throw new ApiError(400, "cloudroom_unsupported", "Cloud forks can't be scheduled.");
     const startRequestId = request.requestId ?? randomUUID();
     const previous = this.deps.db.select().from(cloudroomThreads).where(eq(cloudroomThreads.startRequestId, startRequestId)).get();
@@ -1251,12 +1288,12 @@ class CloudroomService {
     if (!(await this.newThreadsInSandboxes())) throw new ApiError(409, "cloudroom_unsupported", "Cloud forks need cloud sandboxes.");
     const capabilities = await this.savedCapabilities();
     if (capabilities && !capabilities.fork) throw new ApiError(409, "cloudroom_update", "Update the cloud core to fork Cloud threads.");
-    const fork = cloudForkPoint(this.deps.db, source, request.sourceSeqEnd);
+    const fork = saved ? cloudForkPoint(this.deps.db, source, request.sourceSeqEnd) : localForkPoint(this.deps, source, request.sourceSeqEnd);
     const project = getProject(this.deps.db, source.projectId);
     if (!project) throw new ApiError(404, "project_not_found", "Project not found");
     const profile = capabilities ? harnessProfile(capabilities, source.providerId) : null;
     const payload = promptPayload(request.input, source.providerId, capabilities?.attachments === false ? false : profile?.attachments ?? true, cloudPromptLimit(capabilities));
-    const reasoning = request.reasoningLevel ?? this.currentReasoning(source.id, saved);
+    const reasoning = request.reasoningLevel ?? (saved ? this.currentReasoning(source.id, saved) : last?.reasoningLevel ?? "none");
     const workspace = project.id === PERSONAL_PROJECT_ID ? { workspace: ROOT_WORKSPACE } : { workspace: workspaceId(project.id), workspace_name: workspaceName(project.name) };
     const projectNote = project.id === PERSONAL_PROJECT_ID ? undefined : await localProjectNote(this.deps, project.id);
     const thread = this.deps.db.transaction((tx) => {
@@ -1264,7 +1301,7 @@ class CloudroomService {
         executionTarget: "cloud", projectId: source.projectId, providerId: source.providerId, status: "pending", originKind: "fork", sourceThreadId: source.id,
         title: request.title, titleFallback: deriveTitleFallback(request.input), sectionId: request.sectionId, visibility: request.visibility,
       });
-      tx.insert(cloudroomThreads).values({ threadId: thread.id, coreUrl: SANDBOX_PREFIX + thread.id, startRequestId, model: saved.model, reasoning }).run();
+      tx.insert(cloudroomThreads).values({ threadId: thread.id, coreUrl: SANDBOX_PREFIX + thread.id, startRequestId, model, reasoning }).run();
       tx.insert(cloudroomCommands).values({
         id: `first_${thread.id}`, threadId: thread.id, command: "prompt",
         input: JSON.stringify(this.snapshotInstructions(thread, "prompt", {
@@ -1273,6 +1310,7 @@ class CloudroomService {
           strip_ai_co_authors: getAppSettings(this.deps.db).stripAiCoAuthorsEnabled,
           system_prompt: [cloudroomSystemPrompt(this.deps.db), projectNote].filter(Boolean).join("\n\n") || undefined,
           ...(request.serviceTier && request.serviceTier !== "default" ? { service_tier: request.serviceTier } : {}),
+          ...(this.heldStarts.has(startRequestId) ? { awaiting_core: true } : {}),
         })),
         createdAt: Date.now(),
       }).run();
@@ -1294,13 +1332,50 @@ class CloudroomService {
     return getThread(this.deps.db, thread.id)!;
   }
 
-  /** A side chat (ADR 0189): a hidden copy of a Cloud thread's conversation in the same sandbox and folder, like
-   *  a Local one. Its quoted message waits as hidden context for its first message. */
+  /** A side chat (ADR 0273): a fresh agent in a Cloud thread's sandbox and folder, like a Local one. It is only a
+   *  database row here; delivery starts its session in the background. Its quoted message waits as hidden context. */
   async sideChat(source: Thread, request: ForkThreadRequest): Promise<Thread> {
     const saved = binding(this.deps.db, source.id);
     const providerId = source.providerId;
     if (!saved?.sessionId || source.archivedAt || source.deletedAt) throw new ApiError(409, "fork_source_unavailable", "Only a started, unarchived Cloud thread can have a side chat.");
-    if (!isCloudProvider(providerId) || !FORK_HARNESSES.includes(providerId)) throw new ApiError(400, "cloudroom_unsupported", "Cloud side chats support Claude Code and Codex.");
+    if (!isCloudProvider(providerId)) throw new ApiError(400, "cloudroom_unsupported", "This agent can't run in Cloud.");
+    const known = sandboxThread(saved.coreUrl) ? await this.savedCapabilities() : this.lastCapabilities;
+    if (!request.fresh || !known?.side_chat_fresh) return this.copiedSideChat(source, request);
+    await this.requireOwnThread(saved);
+    const thread = this.deps.db.transaction((tx) => {
+      const thread = this.sideChatThread(tx, source, request);
+      tx.insert(cloudroomThreads).values({ threadId: thread.id, coreUrl: saved.coreUrl, startRequestId: randomUUID(), model: saved.model, reasoning: saved.reasoning }).run();
+      tx.insert(cloudroomCommands).values({ id: `first_${thread.id}`, threadId: thread.id, command: "side_chat", state: "completed", input: JSON.stringify({ side_chat: saved.sessionId }), createdAt: Date.now() }).run();
+      return thread;
+    });
+    this.seedSideChat(thread.id, source.id, request, saved);
+    this.notify(thread.id);
+    this.start();
+    void this.deliver(thread.id).catch(() => {});
+    return getThread(this.deps.db, thread.id)!;
+  }
+
+  private sideChatThread(tx: DbTransaction, source: Thread, request: ForkThreadRequest) {
+    return createThread(tx, this.deps.hub, {
+      executionTarget: "cloud", projectId: source.projectId, providerId: source.providerId, status: "starting", originKind: "fork", sourceThreadId: source.id,
+      title: request.title ?? null, titleFallback: source.title ?? source.titleFallback, visibility: request.visibility, originPluginId: request.originPluginId,
+      pluginMetadata: request.pluginMetadata && request.originPluginId ? { pluginId: request.originPluginId, metadata: request.pluginMetadata } : null,
+    });
+  }
+
+  private seedSideChat(threadId: string, sourceId: string, request: ForkThreadRequest, saved: Binding): void {
+    if (request.agentContextSeed) appendClientTurnEvent(this.deps, {
+      type: "client/turn/requested", threadId, environmentId: null, input: request.agentContextSeed, initiator: "agent", senderThreadId: sourceId,
+      requestMethod: "thread/start", source: "spawn", target: { kind: "thread-start" },
+      execution: { source: "client/turn/requested", model: saved.model, reasoningLevel: reasoningLevelSchema.parse(saved.reasoning), permissionMode: "full", serviceTier: "default" },
+    });
+  }
+
+  /** A side chat on a sandbox whose Core predates fresh ones (ADR 0189): a copy of the conversation. */
+  private async copiedSideChat(source: Thread, request: ForkThreadRequest): Promise<Thread> {
+    const saved = binding(this.deps.db, source.id)!;
+    const providerId = source.providerId;
+    if (!isCloudProvider(providerId) || !FORK_HARNESSES.includes(providerId) || !saved.sessionId) throw new ApiError(409, "cloudroom_update", "This Cloud thread's sandbox runs an older Cloudroom version. Side chats for this agent work after its next restart.");
     const client = await this.client(saved);
     const capabilities = await this.capabilities(client);
     if (!capabilities.side_chat) throw new ApiError(409, "cloudroom_update", "This Cloud thread's sandbox runs an older Cloudroom version. Side chats work after its next restart.");
@@ -1313,22 +1388,25 @@ class CloudroomService {
       throw new ApiError(error instanceof CloudroomError && error.status === 409 ? 409 : 503, "cloudroom_fork_rejected", publicError(error));
     }
     const thread = this.deps.db.transaction((tx) => {
-      const thread = createThread(tx, this.deps.hub, {
-        executionTarget: "cloud", projectId: source.projectId, providerId, status: "starting", originKind: "fork", sourceThreadId: source.id,
-        title: request.title ?? null, titleFallback: source.title ?? source.titleFallback, visibility: request.visibility, originPluginId: request.originPluginId,
-        pluginMetadata: request.pluginMetadata && request.originPluginId ? { pluginId: request.originPluginId, metadata: request.pluginMetadata } : null,
-      });
+      const thread = this.sideChatThread(tx, source, request);
       tx.insert(cloudroomThreads).values({ threadId: thread.id, coreUrl: saved.coreUrl, sessionId, startRequestId, model: saved.model, reasoning: saved.reasoning }).run();
       return thread;
     });
     copyForkSourceHistory(this.deps, { fork: thread, history: { kind: "thread", sourceThreadId: source.id, endSequence: end_sequence } });
-    if (request.agentContextSeed) appendClientTurnEvent(this.deps, {
-      type: "client/turn/requested", threadId: thread.id, environmentId: null, input: request.agentContextSeed, initiator: "agent", senderThreadId: source.id,
-      requestMethod: "thread/start", source: "spawn", target: { kind: "thread-start" },
-      execution: { source: "client/turn/requested", model: saved.model, reasoningLevel: reasoningLevelSchema.parse(saved.reasoning), permissionMode: "full", serviceTier: "default" },
-    });
+    this.seedSideChat(thread.id, source.id, request, saved);
     this.follow(binding(this.deps.db, thread.id)!, client);
     return getThread(this.deps.db, thread.id)!;
+  }
+
+  /** A fresh side chat's session; a Core that predates `fresh` rejects the field, and copies the conversation instead. */
+  private async startSideChat(client: CloudroomClient, threadId: string, requestId: string, harness: CloudProvider, session: string) {
+    const accepted = await client.start(requestId, CLOUD_HARNESSES[harness], { fork: { session, fresh: true } }).catch((error: unknown) => {
+      const source = getThread(this.deps.db, getThread(this.deps.db, threadId)?.sourceThreadId ?? "");
+      if (!source || !(error instanceof CloudroomError && (error.status === 400 || error.status === 422))) throw error;
+      const { before, last_turn_id } = cloudForkPoint(this.deps.db, source, undefined);
+      return client.start(requestId, CLOUD_HARNESSES[harness], { fork: { session, before, last_turn_id } });
+    });
+    return { sessionId: accepted.session_id, transfer: `child_${requestId}`, code: null };
   }
 
   /** ADR 0211: a new Core session in the old session's folder. `prepare` runs once the old session is idle and caught up. */
@@ -1651,8 +1729,7 @@ class CloudroomService {
     if (!saved || !current || current.threadId !== thread.id || current.command !== "prompt" || (current.state !== "sending" && current.state !== "accepted")) {
       throw new ApiError(404, "invalid_request", "Queued message not found");
     }
-    const known = sandboxThread(saved.coreUrl) ? await this.savedCapabilities() : this.lastCapabilities;
-    const capabilities = known ?? await this.liveCapabilities(saved);
+    const capabilities = await this.queueCapabilities(saved);
     if (!feature(capabilities, "queue_edit")) throw new ApiError(409, "cloudroom_unsupported", "Cloud queue editing is not enabled.");
     const stored = effectivePrompt(this.deps.db, thread.id, current.id, true);
     const revision = Number(stored.revision ?? 1);
@@ -1676,17 +1753,18 @@ class CloudroomService {
     const saved = binding(this.deps.db, thread.id);
     const current = command(this.deps.db, queuedMessageId);
     if (!saved || !current || current.threadId !== thread.id) throw new ApiError(404, "invalid_request", "Queued message not found");
-    const capabilities = await this.capabilities(await this.client(saved));
-    if (!feature(capabilities, "queue_cancel")) throw new ApiError(409, "cloudroom_unsupported", "Cloud queue cancellation is not enabled.");
-    this.enqueue(thread.id, randomUUID(), "cancel", { target_request_id: queuedMessageId });
+    if (!feature(await this.queueCapabilities(saved), "queue_cancel")) throw new ApiError(409, "cloudroom_unsupported", "Cloud queue cancellation is not enabled.");
+    const id = randomUUID();
+    this.enqueue(thread.id, id, "cancel", { target_request_id: queuedMessageId });
     await this.deliver(thread.id);
+    if (command(this.deps.db, id)?.state === "failed") throw new ApiError(409, "queued_message_started", "Too late: the agent already started this message.");
   }
 
   async reorderQueued(thread: Thread, request: { queuedMessageId: string; previousQueuedMessageId: string | null; nextQueuedMessageId: string | null }) {
     const saved = binding(this.deps.db, thread.id);
     const queue = this.queue(thread.id);
     if (!saved || !queue.some((item) => item.id === request.queuedMessageId)) throw new ApiError(404, "invalid_request", "Queued message not found");
-    const capabilities = await this.capabilities(await this.client(saved));
+    const capabilities = await this.queueCapabilities(saved);
     if (!feature(capabilities, "queue_reorder")) throw new ApiError(409, "cloudroom_unsupported", "Update the cloud core to reorder queued messages.");
     const order = queue.map((item) => item.id).filter((id) => id !== request.queuedMessageId);
     const neighbor = request.previousQueuedMessageId ?? request.nextQueuedMessageId;
@@ -1708,7 +1786,7 @@ class CloudroomService {
     if (!saved || !queued) throw new ApiError(404, "invalid_request", "Queued message not found");
     const active = thread.status === "active" && saved.turnId !== null && !unstartedTurn(this.deps.db, thread.id);
     if (active && queued.content.every((part) => part.type === "text")) {
-      const capabilities = await this.capabilities(await this.client(saved));
+      const capabilities = await this.queueCapabilities(saved);
       if (feature(capabilities, "steer") && feature(capabilities, "queue_cancel") && harnessProfile(capabilities, thread.providerId)?.steer !== false) {
         await this.send(thread, { mode: "steer", input: queued.content });
         await this.cancelQueued(thread, queuedMessageId).catch(() => {});
@@ -1836,6 +1914,7 @@ class CloudroomService {
   start(): void {
     if (this.timer) return;
     this.stopped = false;
+    void this.deliverChildReports();
     for (const saved of bindings(this.deps.db)) {
       this.holdRejectedStart(saved.threadId);
       if (this.deps.db.transaction(tx => projectInitialPrompt(tx, saved.threadId))) this.notify(saved.threadId, ["client/turn/requested"]);
@@ -1946,10 +2025,11 @@ class CloudroomService {
         if (harness === "codex" && capabilities.codex_auth_import && !sandbox) await importCodexLogin(this.deps);
         if (harness === "pi") await this.copyPiSetup(client, Boolean(sandbox));
         const fork = cloudForkOf(initial?.input);
+        const sideChat = initial?.command === "side_chat" ? z.object({ side_chat: z.string() }).parse(JSON.parse(initial.input)).side_chat : null;
         const codeFrom = initial ? z.object({ code_from: z.string().optional() }).parse(JSON.parse(initial.input)).code_from : undefined;
         // A Cloud parent's child reports its own turns, and takes tell, stop and archive, through the website (ADR 0259).
         // Only a parent with a sandbox of its own has a link there; children of one sharing a sandbox keep the app's path.
-        const relayed = Boolean(codeFrom && capabilities.relay && binding(this.deps.db, codeFrom)?.coreUrl === SANDBOX_PREFIX + codeFrom);
+        const relayed = Boolean(codeFrom && getThread(this.deps.db, threadId)?.parentThreadId === codeFrom && capabilities.relay && binding(this.deps.db, codeFrom)?.coreUrl === SANDBOX_PREFIX + codeFrom);
         if (relayed && initial && !JSON.parse(initial.input).parent_thread) {
           this.deps.db.update(cloudroomCommands).set({ input: JSON.stringify({ ...JSON.parse(initial.input), parent_thread: codeFrom }) }).where(eq(cloudroomCommands.id, initial.id)).run();
         }
@@ -1957,16 +2037,18 @@ class CloudroomService {
         if (fork && !capabilities.fork) throw new ApiError(503, "cloudroom_update", "Update the cloud core to fork Cloud threads. Your message is saved.");
         const [copy, started] = await Promise.all([
           options.workspace && options.workspace !== ROOT_WORKSPACE ? planProjectCopy(this.deps, client, threadId, options.workspace, { key: sandbox ? `${sandbox}:${options.workspace}` : options.workspace, branch: baseBranch(initial?.input) }) : null,
-          fork
+          sideChat
+            ? this.startSideChat(client, threadId, saved.startRequestId, harness, sideChat)
+            : fork
             ? startCloudFork(this.deps, client, threadId, fork, {
               model, provider: provider ?? null, reasoning: saved.reasoning, service_tier: z.object({ service_tier: z.string().optional() }).parse(JSON.parse(initial!.input)).service_tier ?? null,
               workspace: options.workspace ?? ROOT_WORKSPACE, workspace_name: options.workspace_name ?? ROOT_WORKSPACE,
               ...(options.command_guard_enabled === undefined ? {} : { command_guard_enabled: options.command_guard_enabled }),
               ...(options.strip_ai_co_authors === undefined ? {} : { strip_ai_co_authors: options.strip_ai_co_authors }),
               ...(options.system_prompt ? { system_prompt: options.system_prompt } : {}),
-            }, (transfer) => {
+            }, (patch) => {
               const latest = command(this.deps.db, `first_${threadId}`)!;
-              this.deps.db.update(cloudroomCommands).set({ input: JSON.stringify({ ...JSON.parse(latest.input), fork: { ...fork, transfer } }) }).where(eq(cloudroomCommands.id, latest.id)).run();
+              this.deps.db.update(cloudroomCommands).set({ input: JSON.stringify({ ...JSON.parse(latest.input), fork: { ...fork, ...patch } }) }).where(eq(cloudroomCommands.id, latest.id)).run();
             })
             : client.start(saved.startRequestId, CLOUD_HARNESSES[harness], { model, reasoning: saved.reasoning, ...options, ...parentThread, ...(provider ? { provider } : {}) }).then((accepted) => {
               const transfer = `child_${threadId}`;
@@ -2037,6 +2119,10 @@ class CloudroomService {
             void this.ensureBranch(threadId, false);
             continue;
           }
+          if (pending.command === "side_chat") {
+            saveCommandState(this.deps.db, threadId, pending.id, "completed");
+            continue;
+          }
           let accepted;
           if (pending.command === "prompt") {
             const parsed = z.object({
@@ -2065,7 +2151,7 @@ class CloudroomService {
             let context = parsed.workspaceContext;
             if (context === undefined) {
               const copying = pending.id === `first_${threadId}` && ["cloning", "uploading", "waiting"].includes(projectCopyProgress(this.deps.db, threadId)?.phase ?? "");
-              const hint = fork ? FORK_HINT : child ? CHILD_HINT : copying ? "[Cloud workspace context]\nThis project is new on the VM. Cloudroom is copying its files into this folder right now: a GitHub clone or an upload from the user's Mac, plus uncommitted edits and .env files. Run `room-cli files wait` before you rely on them; it returns once they land, or says why they won't. Never recreate missing files or instructions such as AGENTS.md." : null;
+              const hint = fork || (child && getThread(this.deps.db, threadId)?.originKind === "fork") ? FORK_HINT : child ? CHILD_HINT : copying ? "[Cloud workspace context]\nThis project is new on the VM. Cloudroom is copying its files into this folder right now: a GitHub clone or an upload from the user's Mac, plus uncommitted edits and .env files. Run `room-cli files wait` before you rely on them; it returns once they land, or says why they won't. Never recreate missing files or instructions such as AGENTS.md." : null;
               context = hint && Buffer.byteLength(`${enriched.text}\n\n${hint}`, "utf8") <= cloudPromptLimit(capabilities) ? hint : null;
               this.deps.db.update(cloudroomCommands).set({ input: JSON.stringify({ ...JSON.parse(pending.input), workspaceContext: context }) }).where(eq(cloudroomCommands.id, pending.id)).run();
             }
@@ -2132,6 +2218,7 @@ class CloudroomService {
               return;
             }
             saveCommandState(this.deps.db, threadId, pending.id, "failed");
+            if (["edit", "cancel"].includes(pending.command) && error instanceof CloudroomError && /queued message is (no longer pending|already being sent)/.test(error.message)) continue;
             rejectedCommand = true;
           }
           throw error;
@@ -2208,10 +2295,47 @@ class CloudroomService {
   }
 
   /** Reports a finished child turn to a Local parent (after the record is shown, as before). */
-  private tellLocalParent(threadId: string, status: ThreadEventTurnStatus): void {
+  private tellLocalParent(threadId: string, status: ThreadEventTurnStatus, turn: string): void {
     const thread = getThread(this.deps.db, threadId);
     const parent = this.reportedParent(thread);
-    if (thread?.parentThreadId && parent && !isCloudThread(parent)) this.childTurnEnded?.({ ...thread, parentThreadId: thread.parentThreadId }, status);
+    if (!thread?.parentThreadId || !parent || isCloudThread(parent)) return;
+    if (teleportBlocked(this.deps.db, parent.id)) {
+      void this.holdChildReport(threadId, status, turn).then(() => this.deliverChildReports(), (error: unknown) => this.warn("A child report could not be saved", error, { threadId }));
+      return;
+    }
+    this.childTurnEnded?.({ ...thread, parentThreadId: thread.parentThreadId }, status);
+  }
+
+  private teleportingParent(threadId: string): boolean {
+    const parent = this.reportedParent(getThread(this.deps.db, threadId));
+    return Boolean(parent && !isCloudThread(parent) && teleportBlocked(this.deps.db, parent.id));
+  }
+
+  private holdChildReport(child: string, status: ThreadEventTurnStatus, turn: string): Promise<void> {
+    return this.updateRecords(CHILD_REPORTS, childReportSchema, (reports) => ({ ...reports, [`${child}:${turn}`]: { child, status, turn } }));
+  }
+
+  private deliverChildReports(): Promise<void> {
+    this.delivering ??= (async () => {
+      try {
+        for (;;) {
+          const reports = Object.entries(await this.records(CHILD_REPORTS, childReportSchema));
+          if (!reports.length || this.stopped) return;
+          let waiting = false;
+          for (const [key, report] of reports) {
+            const thread = getThread(this.deps.db, report.child);
+            const parent = this.reportedParent(thread);
+            if (parent && teleportBlocked(this.deps.db, parent.id)) { waiting = true; continue; }
+            const status = report.status as ThreadEventTurnStatus;
+            if (parent && isCloudThread(parent)) this.noticeCloudParent(report.child, status, report.turn);
+            else if (parent && thread?.parentThreadId) this.childTurnEnded?.({ ...thread, parentThreadId: thread.parentThreadId }, status);
+            await this.updateRecords(CHILD_REPORTS, childReportSchema, ({ [key]: _done, ...rest }) => rest);
+          }
+          if (waiting) await new Promise((resolve) => setTimeout(resolve, 2000));
+        }
+      } finally { this.delivering = undefined; }
+    })();
+    return this.delivering;
   }
 
   /** Reports a child in a sandbox of its own to its Cloud parent, in the words of Core's own child notices, so the
@@ -2299,13 +2423,95 @@ class CloudroomService {
     void this.deliver(child).catch(() => {});
   }
 
+  private async agentFork(parent: Binding, client: CloudroomClient, record: SessionRecord): Promise<void> {
+    const parentThread = getThread(this.deps.db, parent.threadId);
+    if (!parentThread || parentThread.archivedAt || parentThread.deletedAt) return;
+    const input = z.object({ id: z.string().min(1).max(80), prompt: z.string().min(1), machine: z.enum(["local", "cloud"]).optional(), provider: z.string().optional(), model: z.string().optional(), reasoning: z.string().optional(), title: z.string().optional() }).parse(record.data);
+    const requestId = `fork_${createHash("sha256").update(`${parent.threadId}:${input.id}`).digest("hex").slice(0, 40)}`;
+    const forks = await this.agentForks();
+    let fork = forks[requestId] ?? this.deps.db.select().from(cloudroomThreads).where(eq(cloudroomThreads.startRequestId, requestId)).get()?.threadId ?? null;
+    const held = (id: string) => { const first = command(this.deps.db, `first_${id}`); return Boolean(first && JSON.parse(first.input).awaiting_core === true); };
+    if (fork) {
+      const made = getThread(this.deps.db, fork);
+      if (!made || made.archivedAt || made.deletedAt) { await this.answerChild(client, parent, input.id, { error: "This fork was cancelled." }); return; }
+      if (!held(fork)) { await this.answerChild(client, parent, input.id, { thread: fork }); return; }
+    }
+    if (!fork && (this.heldStarts.has(requestId) || (record.timestamp_ms !== undefined && Date.now() - record.timestamp_ms > AGENT_FORK_WAIT))) return;
+    const creating = !fork;
+    if (creating) this.heldStarts.add(requestId);
+    let answer: { thread: string } | { error: string };
+    try {
+      if (!fork) {
+        const providerId = input.provider ? (Object.keys(CLOUD_HARNESSES) as CloudProvider[]).find(id => CLOUD_HARNESSES[id] === input.provider) : parentThread.providerId;
+        if (!providerId) throw new ApiError(400, "cloudroom_unsupported", `Cloud has no ${input.provider} agent.`);
+        const same = providerId === parentThread.providerId;
+        if (input.machine === "local") throw new ApiError(403, "cloudroom_unsupported", "Cloud agents fork only to Cloud. Omit --machine; only the user can fork to their Mac, from the Cloudroom app.");
+        if (!findLastCompletedRootStoredTurn(this.deps.db, { threadId: parentThread.id })) throw new ApiError(409, "fork_source_session_unavailable", "This thread has no finished turn to fork yet: a fork starts at the last finished turn, and this is the first one. Fork in a later turn.");
+        const profile = input.model || same ? null : harnessProfile(await this.savedCapabilities() ?? await this.capabilities(client), providerId);
+        const model = input.model ?? (same ? parent.model : profile && (providerId === "pi" && profile.provider ? `${profile.provider}/${profile.model}` : profile.model));
+        const reasoning = reasoningLevelSchema.safeParse(input.reasoning ?? (same ? this.currentReasoning(parent.threadId, parent) : undefined));
+        if (input.reasoning && !reasoning.success) throw new ApiError(400, "cloudroom_reasoning", `Unknown effort level ${input.reasoning}.`);
+        const { createThreadFromRequest } = await import("../threads/thread-create.js");
+        fork = (await createThreadFromRequest(this.deps as Parameters<typeof createThreadFromRequest>[0], {
+          projectId: parentThread.projectId, providerId, ...(model ? { model } : {}), ...(reasoning.success ? { reasoningLevel: reasoning.data } : {}), ...(input.title ? { title: input.title } : {}),
+          input: [{ type: "text", text: input.prompt, mentions: [] }], originKind: "fork", sourceThreadId: parentThread.id, executionTarget: "cloud",
+          environment: { type: "project-default" }, origin: "cli", startedOnBehalfOf: null, visibility: "visible", requestId,
+        })).id;
+        await this.saveAgentFork(requestId, fork).catch((error: unknown) => this.warn("A Cloud fork request could not be saved", error, { threadId: parent.threadId }));
+      }
+      answer = { thread: fork };
+    } catch (error) {
+      answer = { error: publicError(error) };
+      const made = creating ? this.deps.db.select().from(cloudroomThreads).where(eq(cloudroomThreads.startRequestId, requestId)).get()?.threadId : undefined;
+      if (made && held(made)) this.archiveRequest?.(made);
+    }
+    finally { if (creating) this.heldStarts.delete(requestId); }
+    const confirmed = await this.answerChild(client, parent, input.id, answer);
+    if (!fork) return;
+    if (!confirmed) {
+      if (!getThread(this.deps.db, fork)?.archivedAt) this.archiveRequest?.(fork);
+      return;
+    }
+    const first = command(this.deps.db, `first_${fork}`);
+    if (first && held(fork)) {
+      this.deps.db.update(cloudroomCommands).set({ input: JSON.stringify({ ...JSON.parse(first.input), awaiting_core: undefined }) }).where(eq(cloudroomCommands.id, first.id)).run();
+      void this.deliver(fork).catch(() => {});
+    }
+  }
+
+  private async records<T>(name: string, schema: z.ZodType<T>): Promise<Record<string, T>> {
+    try { return z.record(z.string(), schema).parse(JSON.parse(await readFile(join(this.deps.config.dataDir, name), "utf8"))); } catch { return {}; }
+  }
+
+  private updateRecords<T>(name: string, schema: z.ZodType<T>, update: (records: Record<string, T>) => Record<string, T>): Promise<void> {
+    const path = join(this.deps.config.dataDir, name);
+    const work = (this.recordWrites.get(path) ?? Promise.resolve()).then(async () => {
+      const next = update(await this.records(name, schema));
+      const temporary = `${path}.${randomUUID()}`;
+      try {
+        await writeFile(temporary, JSON.stringify(next), { mode: 0o600, flag: "wx" });
+        await rename(temporary, path);
+      } finally { await rm(temporary, { force: true }); }
+    });
+    this.recordWrites.set(path, work.catch(() => {}));
+    return work;
+  }
+
+  private agentForks(): Promise<Record<string, string>> {
+    return this.records(AGENT_FORKS, z.string());
+  }
+
+  private saveAgentFork(requestId: string, threadId: string): Promise<void> {
+    return this.updateRecords(AGENT_FORKS, z.string(), (forks) => ({ ...forks, [requestId]: threadId }));
+  }
+
   /** True when Core confirmed the child. A refusal is final; a network error is retried briefly. */
   private async answerChild(client: CloudroomClient, parent: Binding, id: string, answer: { thread: string } | { error: string }): Promise<boolean> {
     for (let tries = 1; ; tries++) {
       try { await client.answerChild(parent.sessionId!, id, answer); return "thread" in answer; }
       catch (error) {
         if ((error instanceof CloudroomError && (error.status === 404 || error.status === 409)) || tries === 3) {
-          this.warn("Core did not take a Cloud child's start", error, { threadId: parent.threadId });
+          this.warn(id.startsWith("fork_") ? "Core did not take a Cloud fork's answer" : "Core did not take a Cloud child's start", error, { threadId: parent.threadId });
           return false;
         }
         await new Promise(resolve => setTimeout(resolve, tries * 1000));
@@ -2357,6 +2563,10 @@ class CloudroomService {
             await this.ownSandboxChild(saved, client, record).catch((error: unknown) => this.warn("A Cloud child request failed", error, { threadId: saved.threadId }));
             if (controller.signal.aborted) return;
           }
+          if (record.kind === "fork_request" && record.sequence > (binding(this.deps.db, saved.threadId)?.cursor ?? 0)) {
+            await this.agentFork(saved, client, record).catch((error: unknown) => this.warn("A Cloud fork request failed", error, { threadId: saved.threadId }));
+            if (controller.signal.aborted) return;
+          }
           const outage = mentionsOpenAISide401(record) && await codexOutage();
           if (controller.signal.aborted) return;
           projecting = true;
@@ -2369,11 +2579,15 @@ class CloudroomService {
           }
           const fresh = record.sequence > (binding(this.deps.db, saved.threadId)?.cursor ?? 0);
           const ended = fresh ? endedTurn(record) : null;
-          if (ended) this.noticeCloudParent(saved.threadId, ended, z.object({ request_id: z.string() }).catch({ request_id: String(record.sequence) }).parse(record.data).request_id);
+          const turn = ended ? z.object({ request_id: z.string() }).catch({ request_id: String(record.sequence) }).parse(record.data).request_id : "";
+          if (ended) this.noticeCloudParent(saved.threadId, ended, turn);
+          const held = ended && this.teleportingParent(saved.threadId) ? ended : null;
+          if (held) await this.holdChildReport(saved.threadId, held, turn);
           const eventTypes = projectRecord(this.deps.db, saved.threadId, record, outage);
           projecting = false;
           this.catchUps.delete(saved.threadId);
-          if (ended) this.tellLocalParent(saved.threadId, ended);
+          if (held) void this.deliverChildReports();
+          else if (ended) this.tellLocalParent(saved.threadId, ended, turn);
           // Agents archive their own thread with `room-cli thread archive --self`; like renames, this applies on reconnect.
           if (record.kind === "archive") this.archiveRequest?.(saved.threadId);
           if (record.kind === "secret_request") this.secrets.follow(client, saved.threadId, record);

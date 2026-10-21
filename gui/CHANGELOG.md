@@ -2,6 +2,20 @@
 
 Also on [cloudroom.dev/changelog](https://www.cloudroom.dev/changelog).
 
+## 112
+
+Fork between Local and Cloud (2026-10-20)
+
+### Changes
+
+- Fork any thread to Local or Cloud, and switch its agent or model as you fork.
+- Side chats open instantly with one click and start fresh.
+- Cloud threads pick up again on their own when a Claude or Codex usage limit resets, or when you switch accounts.
+- The Mac helper tells you why Mac access or previews can't connect, like a VPN, proxy, or firewall.
+- Previews work behind more firewalls and proxies.
+- An open browser no longer keeps a Cloud sandbox awake or uses up your cloud hours.
+- New worktrees for big projects start faster.
+
 ## 111
 
 Longer Cloud messages, calmer errors (2026-10-19)

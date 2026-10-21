@@ -14,34 +14,32 @@ async function askForMoreUsage() {
   if (!response.ok) throw new Error(value?.message ?? `The request for more usage failed (HTTP ${response.status}).`);
 }
 
+/** The next plan up at a cloud limit (docs/scopes/pricing.md). Ultra has none, so it only asks the team. */
+const UPGRADES: Record<string, { name: string; price: string; pitch: string }> = {
+  free: { name: "Pro", price: "$50/mo", pitch: "Pro gives you 10× more cloud agents and no daily limit." },
+  pro: { name: "Super", price: "$150/mo", pitch: "Super gives you 3× more cloud agents and compute." },
+  super: { name: "Ultra", price: "$500/mo", pitch: "Ultra gives you 3× more cloud agents and compute." },
+};
+
+/** Free only upgrades. Paid plans also ask the team, which counts demand for compute credits (ADR 0235). */
 export function CloudUsageLimitNotice() {
   const ask = useMutation({ mutationFn: askForMoreUsage });
-  const plan = useCloudroomAccount().data?.planUsage?.plan;
-  useUpgradePromptViewed(plan === "free" || plan === "pro" ? "limit_notice" : null);
-  if (plan === "free") {
-    return (
-      <PromptStackCard ariaLabel="Cloud usage limit" className="space-y-2 p-3 text-xs">
-        <p className="text-sm font-medium">You hit the Free plan's cloud limit.</p>
-        <p className="text-muted-foreground">Your messages are saved, and Local threads still work. Pro gives you 10× more cloud agents and no daily limit.</p>
-        <Button type="button" size="sm" onClick={() => openUpgrade("limit_notice")}>
-          Upgrade to Pro<span className="font-normal opacity-70">$50/mo</span><Icon name="ArrowRight" aria-hidden />
-        </Button>
-      </PromptStackCard>
-    );
-  }
+  const plan = useCloudroomAccount().data?.plan ?? null;
+  const upgrade = plan ? UPGRADES[plan] : undefined;
+  useUpgradePromptViewed(upgrade ? "limit_notice" : null);
   return (
     <PromptStackCard ariaLabel="Cloud usage limit" className="space-y-2 p-3 text-xs">
-      <p className="text-sm font-medium">You hit your plan's cloud limit.</p>
-      <p className="text-muted-foreground">Your messages are saved, and Local threads still work. {plan === "pro" ? "Super gives you 3× more cloud agents and compute." : "Older usage stops counting after 30 days."}</p>
+      <p className="text-sm font-medium">{plan === "free" ? "You hit the Free plan's cloud limit." : "You hit your plan's cloud limit."}</p>
+      <p className="text-muted-foreground">Your messages are saved, and Local threads still work. {upgrade?.pitch ?? "Older usage stops counting after 30 days."}</p>
       <div className="flex flex-wrap items-center gap-2">
-        {plan === "pro" && (
+        {upgrade && (
           <Button type="button" size="sm" onClick={() => openUpgrade("limit_notice")}>
-            Upgrade to Super<span className="font-normal opacity-70">$150/mo</span><Icon name="ArrowRight" aria-hidden />
+            Upgrade to {upgrade.name}<span className="font-normal opacity-70">{upgrade.price}</span><Icon name="ArrowRight" aria-hidden />
           </Button>
         )}
-        {ask.isSuccess
+        {plan !== "free" && (ask.isSuccess
           ? <p role="status" className="text-muted-foreground">Sent. The Cloudroom team will reach out to set up a quick call.</p>
-          : <Button type="button" size="sm" variant={plan === "pro" ? "outline" : "default"} disabled={ask.isPending} onClick={() => ask.mutate()}>Ask for more usage</Button>}
+          : <Button type="button" size="sm" variant={upgrade ? "outline" : "default"} disabled={ask.isPending} onClick={() => ask.mutate()}>Ask for more usage</Button>)}
       </div>
       {ask.error && <p role="alert" className="text-destructive">{ask.error.message}</p>}
     </PromptStackCard>

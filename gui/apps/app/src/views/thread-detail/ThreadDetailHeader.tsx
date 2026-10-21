@@ -9,6 +9,7 @@ import { Button } from "@cloudroom/shared-ui/button";
 import { useAtomValue } from "jotai";
 import { Icon } from "@cloudroom/shared-ui/icon";
 import { Pill } from "@cloudroom/shared-ui/pill";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@cloudroom/shared-ui/tooltip";
 import {
   HoverCard,
   HoverCardContent,
@@ -51,6 +52,7 @@ interface ThreadDetailHeaderProps {
   isSecondaryPanelOpen: boolean;
   onClosePane?: () => void;
   onToggleSecondaryPanel: () => void;
+  onStartSideChat?: () => void;
   pluginActions?: ReactNode;
   shareButton?: ReactNode;
   threadId: string;
@@ -104,6 +106,7 @@ export function ThreadDetailHeader({
   isSecondaryPanelOpen,
   onClosePane,
   onToggleSecondaryPanel,
+  onStartSideChat,
   pluginActions,
   shareButton,
   threadId,
@@ -224,9 +227,31 @@ export function ThreadDetailHeader({
         {pluginActions}
       </div>
       <div
-        className="ml-1 flex items-center gap-0.5"
+        className="relative ml-1 flex items-center gap-0.5"
         data-thread-header-pane-actions=""
       >
+        {onStartSideChat ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className={cn(
+                  HEADER_ICON_BUTTON_CLASS,
+                  CHROME_SUBTLE_ICON_BUTTON_FOREGROUND_CLASS,
+                  "absolute right-0 top-full z-20 mt-2",
+                  usesDesktopChrome && MACOS_WINDOW_NO_DRAG_CLASS,
+                )}
+                aria-label="Side chat"
+                onClick={onStartSideChat}
+              >
+                <Icon name="SideChat" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="left">Side chat</TooltipContent>
+          </Tooltip>
+        ) : null}
         {showRightPanelToggle ? (
           <span className="inline-flex items-center gap-1.5">
             <AppCommandShortcutHint shortcut={panelShortcut} />

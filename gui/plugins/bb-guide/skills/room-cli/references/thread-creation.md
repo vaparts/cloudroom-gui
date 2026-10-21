@@ -1,6 +1,6 @@
 # Thread, project, environment, and machine creation
 
-For Cloud, use `room-cli thread spawn --project PROJECT --machine cloud --provider codex --model MODEL --request-id UNIQUE_ID --prompt "Task"` (or `--provider pi`). Reuse the request ID after an unconfirmed submission. `--parent-thread` with a Cloud parent starts a linked child in the parent's sandbox and folder; Core messages the parent when it finishes. A Local parent's Cloud child gets its own sandbox and the app messages the parent when it finishes. It starts from GitHub, not local files: push first and pass `--base-branch BRANCH`. Cloud forks, native-machine/worktree options, and scheduling are not enabled. Attachment support depends on the connected core/harness; inspect `room-cli cloud status --json` and verify the agent reads the file. The native environment workflows below apply to Local threads.
+For Cloud, use `room-cli thread spawn --project PROJECT --machine cloud --provider codex --model MODEL --request-id UNIQUE_ID --prompt "Task"` (or `--provider pi`). Reuse the request ID after an unconfirmed submission. `--parent-thread` with a Cloud parent starts a linked child in the parent's sandbox and folder; Core messages the parent when it finishes. A Local parent's Cloud child gets its own sandbox and the app messages the parent when it finishes. It starts from GitHub, not local files: push first and pass `--base-branch BRANCH`. Native-machine/worktree options and scheduling are not enabled; fork with `room-cli thread fork --machine cloud`. Attachment support depends on the connected core/harness; inspect `room-cli cloud status --json` and verify the agent reads the file. The native environment workflows below apply to Local threads.
 
 ## Spawning Threads
 
@@ -52,8 +52,14 @@ worktree` only; a provider takes its branch through `--environment-inputs`.
   fork in the source environment by default; add `--prompt`, select an existing
   environment with `--environment`, or create a fresh personal workspace or
   worktree with `--new-environment personal|worktree`. `--base-branch` matches
-  spawn for worktrees, while the target machine is always derived from the
-  source environment. Anchor with
+  spawn for worktrees. `--machine local|cloud` forks across sides (Claude Code
+  and Codex): the default is the source's side, or Local when environment flags
+  are set. A Cloud fork gets its own sandbox with the source's code; a Local
+  fork of a Cloud thread copies its conversation and code to this Mac. To fork
+  into another harness, Local or Cloud, use `room-cli thread spawn --origin-kind
+  fork --source-thread ID --provider P --model M --prompt TEXT`; it gets the
+  conversation as hidden text instead of a native fork. A Cloud agent forks its
+  own thread with Core's `room-cli thread fork`, into Cloud only. Anchor with
   `--source-seq-end` on a completed source turn (the clone and inherited
   timeline both end with the turn containing that sequence). Permission mode
   inherits the source thread unless explicitly overridden.

@@ -25,6 +25,9 @@ export interface ForkThreadCreateSeed {
 }
 
 interface BuildForkThreadRequestArgs extends ForkThreadCreateSeed {
+  environment: AppCreateThreadRequest["environment"];
+  executionTarget: AppCreateThreadRequest["executionTarget"];
+  requestId?: string | undefined;
   input: PromptInput[];
   pluginSubmission: AppCreateThreadRequest["pluginSubmission"];
   providerSupportsFork: boolean;
@@ -52,7 +55,8 @@ export function isThreadForkable(
 }
 
 export function buildForkThreadRequest({
-  environmentId,
+  environment,
+  executionTarget,
   input,
   model,
   permissionMode,
@@ -61,20 +65,20 @@ export function buildForkThreadRequest({
   providerId,
   providerSupportsFork,
   reasoningLevel,
+  requestId,
   serviceTier,
   sourceSeqEnd,
   sourceThreadId,
 }: BuildForkThreadRequestArgs): AppCreateThreadRequest | null {
-  const cloud = environmentId === null;
+  const cloud = executionTarget === "cloud";
   if (!cloud && !providerSupportsFork) {
     return null;
   }
 
   return {
-    environment: cloud
-      ? { type: "project-default" }
-      : { type: "reuse", environmentId },
-    ...(cloud ? { executionTarget: "cloud" as const } : {}),
+    environment: cloud ? { type: "project-default" } : environment,
+    executionTarget: cloud ? "cloud" : "local",
+    ...(cloud && requestId ? { requestId } : {}),
     input,
     model,
     originKind: "fork",

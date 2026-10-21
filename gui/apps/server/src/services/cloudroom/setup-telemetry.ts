@@ -120,24 +120,35 @@ function updateFailureCode(lines: string[]): string {
 }
 
 /** Links this install to its Cloudroom account, so its PostHog events map to a person. At startup and after sign-in. */
-export const linkInstall = () => save("install_linked", {});
+export const linkInstall = () => { void save("install_linked", {}); };
+
+const helperProblems = new Map<string, number>();
+export function reportMacHelperProblem(detail: string): void {
+  const now = Date.now(), next = helperProblems.get(detail);
+  if (next === undefined ? helperProblems.size >= 20 : next > now) return;
+  helperProblems.set(detail, Infinity);
+  void save("mac_helper", { outcome: "failed", message: scrub(detail), seconds_since_first_launch: secondsSinceFirstLaunch() }).then((saved) => {
+    if (!saved) helperProblems.set(detail, now + 5 * 60_000);
+  });
+}
 
 /** Telemetry must never break setup, so building or sending an event can't throw. */
 function capture(name: "setup_snapshot" | "agent_connect" | "cli_install" | "account_sign_in_failed" | "update_install", properties: () => Record<string, TelemetryValue>): void {
   try {
     const event: Record<string, TelemetryValue> = { ...properties(), seconds_since_first_launch: secondsSinceFirstLaunch() };
     deps?.telemetry.capture({ name, properties: event });
-    if (event.outcome === "failed" || event.reason === "connect_failed") save(name, event);
+    if (event.outcome === "failed" || event.reason === "connect_failed") void save(name, event);
   } catch (error) { deps?.logger.debug({ err: error, event: name }, "Setup telemetry failed"); }
 }
 
 /** Saves an event with the signed-in account through the website. Signed out, telemetry off, or BB_TELEMETRY=false: nothing is sent. */
-function save(event: string, context: Record<string, TelemetryValue>): void {
-  void Promise.resolve().then(async () => {
-    if (!deps?.telemetryAllowed || !getAppSettings(deps.db).telemetryEnabled) return;
+function save(event: string, context: Record<string, TelemetryValue>): Promise<boolean> {
+  return Promise.resolve().then(async () => {
+    if (!deps?.telemetryAllowed || !getAppSettings(deps.db).telemetryEnabled) return false;
     const installId = await readOrCreateSecretFile({ bytes: 16, dataDir: deps.config.dataDir, encoding: "hex", fileName: TELEMETRY_ID_FILE_NAME });
     await deps.sandboxes.setupEvent(event, { ...context, install_id: installId });
-  }).catch(error => deps?.logger.debug({ err: error, event }, "Setup event not saved"));
+    return true;
+  }).catch(error => { deps?.logger.debug({ err: error, event }, "Setup event not saved"); return false; });
 }
 
 const run = (file: string, args: string[]) => new Promise<string>(resolve => {

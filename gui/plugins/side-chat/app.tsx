@@ -22,7 +22,6 @@ type SideChatPanelParams = {
   threadId: string;
   sourceThreadId: string;
   sourceMessageText: string;
-  sourceSeqEnd: number | null;
 };
 
 export function parsePanelParams(value: unknown): SideChatPanelParams | null {
@@ -45,8 +44,6 @@ export function parsePanelParams(value: unknown): SideChatPanelParams | null {
       typeof record.sourceMessageText === "string"
         ? record.sourceMessageText
         : "",
-    sourceSeqEnd:
-      typeof record.sourceSeqEnd === "number" ? record.sourceSeqEnd : null,
   };
 }
 
@@ -95,7 +92,6 @@ function createdThreadId(result: unknown): string {
 interface OpenSideChatArgs {
   sourceThreadId: string;
   anchorText: string;
-  sourceSeqEnd: number | null;
   openPanel(options: { title: string; params: SideChatPanelParams }): boolean;
 }
 
@@ -104,12 +100,8 @@ const inFlightOpens = new Map<string, Promise<void>>();
 function openKey({
   sourceThreadId,
   anchorText,
-  sourceSeqEnd,
-}: Pick<
-  OpenSideChatArgs,
-  "sourceThreadId" | "anchorText" | "sourceSeqEnd"
->): string {
-  return `${sourceThreadId}|${sourceSeqEnd ?? "tip"}|${anchorText}`;
+}: Pick<OpenSideChatArgs, "sourceThreadId" | "anchorText">): string {
+  return `${sourceThreadId}|${anchorText}`;
 }
 
 function openSideChat(args: OpenSideChatArgs): Promise<void> {
@@ -130,17 +122,12 @@ function openSideChat(args: OpenSideChatArgs): Promise<void> {
 async function createAndOpenSideChat({
   sourceThreadId,
   anchorText,
-  sourceSeqEnd,
   openPanel,
 }: OpenSideChatArgs): Promise<void> {
   let threadId: string;
   try {
     threadId = createdThreadId(
-      await callBackendRpc("createSideChat", {
-        sourceThreadId,
-        ...(sourceSeqEnd !== null ? { sourceSeqEnd } : {}),
-        anchorText,
-      }),
+      await callBackendRpc("createSideChat", { sourceThreadId, anchorText }),
     );
   } catch (error) {
     toast.error(
@@ -156,7 +143,6 @@ async function createAndOpenSideChat({
       threadId,
       sourceThreadId,
       sourceMessageText: anchorText,
-      sourceSeqEnd,
     },
   });
 }
@@ -279,13 +265,11 @@ export default definePluginApp((app) => {
     id: "reply-in-side-chat",
     title: "Side chat",
     icon: "SideChat",
-    experimental_requiresFork: true,
     async run(context: PluginMessageActionContext) {
       const anchorText = context.selectedText ?? context.message.text;
       await openSideChat({
         sourceThreadId: context.threadId,
         anchorText,
-        sourceSeqEnd: context.message.sourceSeqEnd,
         openPanel: (options) =>
           context.openPanel({ actionId: PANEL_ACTION_ID, ...options }),
       });
@@ -296,13 +280,11 @@ export default definePluginApp((app) => {
     title: "Start side chat",
     icon: "SideChat",
     component: SideChatPanel,
-    experimental_requiresFork: true,
     layout: "flush",
     async run(context: PluginThreadPanelActionContext) {
       await openSideChat({
         sourceThreadId: context.threadId,
         anchorText: "",
-        sourceSeqEnd: null,
         openPanel: (options) => context.openPanel(options),
       });
     },

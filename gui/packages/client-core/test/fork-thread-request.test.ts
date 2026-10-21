@@ -23,7 +23,9 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
 describe("buildForkThreadRequest", () => {
   it("preserves plugin submission data in a fork dispatch request", () => {
     const request = buildForkThreadRequest({
+      environment: { type: "reuse", environmentId: "env_source" },
       environmentId: "env_source",
+      executionTarget: undefined,
       input: [{ type: "text", text: "Continue from here", mentions: [] }],
       model: "gpt-5",
       permissionMode: "accept-edits",
@@ -43,6 +45,7 @@ describe("buildForkThreadRequest", () => {
 
     expect(request).toEqual({
       environment: { type: "reuse", environmentId: "env_source" },
+      executionTarget: "local",
       input: [{ type: "text", text: "Continue from here", mentions: [] }],
       model: "gpt-5",
       originKind: "fork",
@@ -63,7 +66,9 @@ describe("buildForkThreadRequest", () => {
 
   it("omits unsupported service tier", () => {
     const request = buildForkThreadRequest({
+      environment: { type: "reuse", environmentId: "env_source" },
       environmentId: "env_source",
+      executionTarget: undefined,
       input: [{ type: "text", text: "Continue from here", mentions: [] }],
       model: "gpt-5",
       permissionMode: "auto",
@@ -85,7 +90,9 @@ describe("buildForkThreadRequest", () => {
   it("builds a fork request for a generic ACP provider", () => {
     expect(
       buildForkThreadRequest({
+        environment: { type: "reuse", environmentId: "env_source" },
         environmentId: "env_source",
+        executionTarget: undefined,
         input: [{ type: "text", text: "Continue from here", mentions: [] }],
         model: "gpt-5",
         permissionMode: "auto",
@@ -109,7 +116,9 @@ describe("buildForkThreadRequest", () => {
   it("returns null when the provider cannot fork sessions", () => {
     expect(
       buildForkThreadRequest({
+        environment: { type: "reuse", environmentId: "env_source" },
         environmentId: "env_source",
+        executionTarget: undefined,
         input: [{ type: "text", text: "Continue from here", mentions: [] }],
         model: "unknown-model",
         permissionMode: "auto",

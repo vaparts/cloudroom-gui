@@ -6,6 +6,7 @@ This index lists every command path that the core CLI registers. Read the task-s
 
 - `room-cli cloud`
 - `room-cli cloud status`
+- `room-cli cloud check`
 - `room-cli cloud sign-in`
 - `room-cli cloud cancel`
 - `room-cli cloud logout`

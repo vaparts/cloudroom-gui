@@ -546,17 +546,24 @@ export function RootComposeView() {
             }
           : buildForkThreadRequest({
               ...forkSeed,
+              environment: request.environment,
+              executionTarget: request.executionTarget,
+              requestId: request.requestId,
               input: request.input,
               model: request.model,
               permissionMode: request.permissionMode,
               pluginSubmission: request.pluginSubmission,
+              providerId: request.providerId,
               providerSupportsFork:
-                findCachedProviderInfo(queryClient, forkSeed.providerId)
-                  ?.capabilities.supportsFork ?? false,
+                request.providerId !== forkSeed.providerId ||
+                (findCachedProviderInfo(queryClient, forkSeed.providerId)
+                  ?.capabilities.supportsFork ??
+                  false),
               reasoningLevel: request.reasoningLevel,
               serviceTier: request.serviceTier,
             });
-      if (createRequest === null) return;
+      if (createRequest === null)
+        throw new Error("This agent can't fork on this Mac. Pick Cloud instead.");
       const thread = await createThread.mutateAsync(
         sendAt === undefined
           ? createRequest
@@ -1953,8 +1960,7 @@ function RootComposeSurface({
     onRequestMachineSetup: handleRequestMachineSetup,
     locks: {
       project: isForkDraft,
-      provider: isForkDraft,
-      environment: isForkDraft,
+      baseBranch: isForkDraft,
     },
   });
 

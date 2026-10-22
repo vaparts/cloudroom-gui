@@ -60,7 +60,7 @@ export function PlanCard() {
   const pro = usage?.plan === "pro";
   const rows = usage ? [
     { label: "cloud agents", used: usage.agents, limit: usage.agentsLimit },
-    ...(usage.cpuHours === null ? [] : [{ label: "cloud hours", used: usage.cpuHours, limit: usage.cpuHoursLimit }]),
+    ...(usage.cpuHours === null ? [] : [{ label: "agent hours", used: usage.cpuHours, limit: usage.cpuHoursLimit }]),
   ] : [];
   const hidden = !usage || (pro && !rows.some(({ used, limit }) => share(used, limit) >= 0.8));
   useUpgradePromptViewed(hidden ? null : "plan_card");
@@ -88,7 +88,7 @@ const PRO_REASONS = [
   "Pro gives you 1,000 cloud agents a month. Free gives you 100.",
   "Pro runs your cloud agents on 2× more powerful sandboxes.",
   "Pro has no daily limit. Free stops at 50 new cloud agents a day.",
-  "Pro gives you 300+ hours of agent work every month.",
+  "Pro gives you 300 agent hours every month.",
   "Pro keeps cloud agents awake 4× longer, so they reply faster.",
   "Pro cloud agents never get paused when the cloud gets busy.",
   "Pro keeps your chat history for 1 year. Free keeps 60 days.",

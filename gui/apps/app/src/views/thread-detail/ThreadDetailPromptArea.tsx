@@ -28,6 +28,7 @@ import type { PromptMentionLinkResolver } from "@/components/promptbox/editor/pr
 import {
   getFollowUpPromptPlaceholder,
   getCompactFollowUpPromptPlaceholder,
+  getFollowUpPromptPlaceholderHint,
 } from "@/components/promptbox/follow-up-placeholder";
 import { PERSONAL_PROJECT_ID } from "@cloudroom/domain";
 import type {
@@ -924,6 +925,9 @@ export function ThreadDetailPromptArea({
   const compactPromptPlaceholder = getCompactFollowUpPromptPlaceholder(
     isStopRequested ? "stopping" : runtimeDisplayStatus,
   );
+  const promptPlaceholderHint = getFollowUpPromptPlaceholderHint(
+    isStopRequested ? "stopping" : runtimeDisplayStatus,
+  );
   const submitProgrammaticallyRef = useRef<
     (
       options: ExperimentalComposerSubmitOptions,
@@ -1341,6 +1345,7 @@ export function ThreadDetailPromptArea({
       onSubmit: handleBottomComposerSubmit,
       compactPromptPlaceholder,
       promptPlaceholder,
+      promptPlaceholderHint,
       canModifierSubmit: (!isCloud || cloudSteerSupported) && canSubmitModifierShortcut,
       steerActiveThreadOnEnter: isCloud ? cloudSteerSupported && steerActiveThreadOnEnter : steerActiveThreadOnEnter,
       submitMode: movingToLocal ? { kind: "ready" } : submitMode,
@@ -1359,6 +1364,7 @@ export function ThreadDetailPromptArea({
       movingToLocal,
       promptHistoryDrafts,
       promptPlaceholder,
+      promptPlaceholderHint,
       promptDraft.setDraft,
       runtimeDisplayStatus,
       steerActiveThreadOnEnter,

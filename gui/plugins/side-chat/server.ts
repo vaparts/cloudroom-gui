@@ -44,15 +44,6 @@ interface SideChatForkCandidate {
   createdAt: number;
 }
 
-function isSessionUnavailableError(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code: unknown }).code === "fork_source_session_unavailable"
-  );
-}
-
 function isOwnLiveHiddenFork(
   thread: SideChatForkCandidate,
   pluginId: string,
@@ -70,7 +61,6 @@ export const sideChatRpcContract = defineRpcContract({
     input: z
       .object({
         sourceThreadId: z.string().trim().min(1),
-        sourceSeqEnd: z.number().int().nonnegative().optional(),
         anchorText: z.string(),
       })
       .strict(),
@@ -90,11 +80,12 @@ export const sideChatRpcContract = defineRpcContract({
 
 export default async function plugin(bb: BbPluginApi) {
   bb.rpc.register(sideChatRpcContract, {
-    async createSideChat({ sourceThreadId, sourceSeqEnd, anchorText }) {
+    async createSideChat({ sourceThreadId, anchorText }) {
       const seedText = resolveReplySeedText(anchorText);
-      const forkArgs = {
+      const fork = await bb.sdk.threads.fork({
         sourceThreadId,
-        visibility: "hidden" as const,
+        fresh: true,
+        visibility: "hidden",
         ...(seedText !== null
           ? {
               agentContextSeed: [
@@ -107,20 +98,8 @@ export default async function plugin(bb: BbPluginApi) {
               ],
             }
           : {}),
-      };
-      try {
-        const fork = await bb.sdk.threads.fork({
-          ...forkArgs,
-          ...(sourceSeqEnd !== undefined ? { sourceSeqEnd } : {}),
-        });
-        return { threadId: fork.id };
-      } catch (error) {
-        if (sourceSeqEnd === undefined || !isSessionUnavailableError(error)) {
-          throw error;
-        }
-        const fork = await bb.sdk.threads.fork(forkArgs);
-        return { threadId: fork.id };
-      }
+      });
+      return { threadId: fork.id };
     },
     async sendToMain({ sourceThreadId, senderThreadId, text }) {
       await bb.sdk.threads.queuedMessages.create({

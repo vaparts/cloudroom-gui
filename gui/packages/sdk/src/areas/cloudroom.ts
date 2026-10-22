@@ -26,7 +26,7 @@ export interface CloudroomStatus {
   model: string | null;
   error: string | null;
   sync?: { state: "synced" | "syncing" | "offline" | "conflict"; conflicts: number; issue: string | null } | null;
-  previews?: { state: "connected" | "offline"; count: number; message: string | null; issue: string | null } | null;
+  previews?: { state: "connected" | "offline"; count: number; message: string | null; issue: string | null; explained?: boolean } | null;
   /** Cloud agents may run commands on this computer (ADR 0113); null until first-run setup asks. */
   macAccess?: boolean | null;
   /** How much cloud agents may do on this computer (ADR 0186); null until first-run setup asks. */
@@ -39,6 +39,8 @@ export interface CloudroomStatus {
   signInError: string | null;
   /** The account's place in the cloud queue, or a blocked region: new Cloud threads wait. Null when it may start them. */
   cloudQueue?: { position: number; total: number; regionBlocked: boolean } | null;
+  /** The account's plan (free, pro, super, ultra) from the website's mode check; null while billing is off or unknown. */
+  plan?: string | null;
   /** A Free or Pro account's 30-day usage, for the sidebar upgrade card. Null for other plans or while in the cloud queue. */
   planUsage?: { plan: "free" | "pro"; agents: number; agentsLimit: number; cpuHours: number | null; cpuHoursLimit: number } | null;
 }
@@ -206,6 +208,7 @@ export interface CloudroomArea {
   githubAccount(signal?: AbortSignal): Promise<CloudroomGithubAccount | null>;
   /** Removes the cloud GitHub login and stops copying this Mac's `gh` login. */
   disconnectGithub(): Promise<void>;
+  checkPreviews(): Promise<void>;
   /** Recently updated repos on this Mac and GitHub that no project uses yet. */
   repoSuggestions(signal?: AbortSignal): Promise<{ githubConnected: boolean; repos: RepoSuggestion[] }>;
   /** Makes an `owner/name` GitHub repo a project right away. Machines and sandboxes clone it when first needed. */
@@ -223,6 +226,8 @@ export interface CloudroomArea {
   autoDelete(signal?: AbortSignal): Promise<{ days: AutoDeleteDays }>;
   /** Lists, creates, changes, runs, or deletes cloud automations. */
   automations(input: CloudAutomationRequest): Promise<CloudAutomationResponse>;
+  /** Organizations (docs/scopes/organizations.md): passes one request to the website's `/api/desktop/org`, signed in as this account. */
+  org(input: { action: string } & Record<string, unknown>): Promise<unknown>;
   setAutoDelete(days: AutoDeleteDays): Promise<{ days: AutoDeleteDays }>;
   /** Names of API keys and tokens set in this Mac's login shell, never their values. */
   macVariables(signal?: AbortSignal): Promise<{ names: string[] }>;
@@ -340,6 +345,7 @@ export function createCloudroomArea({ transport }: CreateSdkAreaArgs): Cloudroom
     cancelGithubLogin: (requestId) => transport.readJson(request("/github/cancel", { requestId })) as Promise<CloudroomCodexAuth>,
     githubAccount: (signal) => transport.readJson(request("/github/account", undefined, signal)) as Promise<CloudroomGithubAccount | null>,
     disconnectGithub: () => transport.readVoid(request("/github/disconnect", {})),
+    checkPreviews: () => transport.readVoid(request("/previews/check", {})),
     status: (signal) => transport.readJson(request("", undefined, signal)) as Promise<CloudroomStatus>,
     signIn: (input = {}) => transport.readJson(request("/sign-in", input)) as Promise<{ url: string }>,
     connect: (input) => transport.readVoid(transport.fetch(`${transport.baseUrl}/api/v1/cloudroom`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) })),
@@ -350,6 +356,7 @@ export function createCloudroomArea({ transport }: CreateSdkAreaArgs): Cloudroom
     updateEnvironment: (change) => transport.readJson(request("/environment", change)) as Promise<CloudEnvironment>,
     autoDelete: (signal) => transport.readJson(request("/auto-delete", undefined, signal)) as Promise<{ days: AutoDeleteDays }>,
     automations: (input) => transport.readJson(request("/automations", input)) as Promise<CloudAutomationResponse>,
+    org: (input) => transport.readJson(request("/org", input)),
     setAutoDelete: (days) => transport.readJson(request("/auto-delete", { days })) as Promise<{ days: AutoDeleteDays }>,
     macVariables: (signal) => transport.readJson(request("/environment/mac", undefined, signal)) as Promise<{ names: string[] }>,
     importMacVariables: (names) => transport.readJson(request("/environment/mac", { names })) as Promise<CloudEnvironment>,

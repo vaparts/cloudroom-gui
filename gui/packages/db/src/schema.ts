@@ -651,12 +651,14 @@ export const cloudroomThreads = sqliteTable("cloudroom_threads", {
   accountId: text("account_id"),
   /** Last workspace (path, branch, head) read from the sandbox, shown while it sleeps. */
   lastWorkspace: text("last_workspace"),
+  /** Last git status read from the sandbox, shown while it sleeps. */
+  lastGitStatus: text("last_git_status"),
 });
 
 export const cloudroomCommands = sqliteTable("cloudroom_commands", {
   id: text("id").primaryKey(),
   threadId: text("thread_id").notNull().references(() => cloudroomThreads.threadId, { onDelete: "cascade" }),
-  command: text("command", { enum: ["prompt", "stop", "resume", "sleep", "edit", "cancel", "reorder", "steer", "compact", "goal", "rewind", "attach", "title", "teleport"] }).notNull(),
+  command: text("command", { enum: ["prompt", "stop", "resume", "sleep", "edit", "cancel", "reorder", "steer", "compact", "goal", "rewind", "attach", "title", "teleport", "side_chat"] }).notNull(),
   input: text("input").notNull(),
   state: text("state").notNull().default("sending"),
   createdAt: integer("created_at").notNull(),

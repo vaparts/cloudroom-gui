@@ -88,6 +88,7 @@ type AppToastMethod = (
 ) => string | number;
 
 const DEFAULT_TOAST_DURATION = 4000;
+const ERROR_TOAST_DURATION = 10000;
 
 export function iconForTone(tone: AppToastTone): IconName {
   switch (tone) {
@@ -331,7 +332,12 @@ function showAppToast({
     ...sonnerOptions
   } = options ?? {};
   const nextDuration =
-    duration ?? (tone === "loading" ? Infinity : DEFAULT_TOAST_DURATION);
+    duration ??
+    (tone === "loading"
+      ? Infinity
+      : tone === "error"
+        ? ERROR_TOAST_DURATION
+        : DEFAULT_TOAST_DURATION);
   const notificationId =
     tone === "loading"
       ? null

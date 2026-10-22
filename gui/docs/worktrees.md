@@ -72,6 +72,10 @@ bb copies every untracked file in the source checkout that matches a pattern,
 after it creates the worktree and before it runs `.bb-env-setup.sh`. Your
 setup script can therefore read the copied files.
 
+For speed, give every pattern a path, like `/.env` or `web/.env.local`. bb then
+looks only there. A pattern that can match at any depth, like `.env` or
+`certs/`, makes bb scan every untracked file, including `node_modules`.
+
 Contract:
 
 - bb copies files. It does not create symlinks, and each worktree gets its own

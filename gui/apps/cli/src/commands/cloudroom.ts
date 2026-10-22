@@ -123,7 +123,11 @@ export function registerCloudCommands(program: Command, getUrl: () => string): v
   const group = program.command("cloud").description("Connect this app to your Cloudroom account and VM");
   group.command("status").option("--json", "Print JSON").action(action(async (options: JsonOutputOptions) => {
     const status = await createCliBbSdk(getUrl()).cloudroom.status();
-    if (!outputJson(options, status)) console.log(`${status.account?.email ?? "Signed out"}\n${status.signingIn ? "Waiting for browser confirmation" : status.ready ? "Cloud connected" : status.error ?? "Cloud unavailable"}${status.signInError ? `\n${status.signInError}` : ""}`);
+    if (!outputJson(options, status)) console.log(`${status.account?.email ?? "Signed out"}\n${status.signingIn ? "Waiting for browser confirmation" : status.ready ? "Cloud connected" : status.error ?? "Cloud unavailable"}${status.signInError ? `\n${status.signInError}` : ""}${status.previews?.explained && status.previews.state === "offline" && status.previews.message ? `\nMac access and previews can't connect: ${status.previews.message}` : ""}`);
+  }));
+  group.command("check").description("Make Mac access and previews check their connection to Cloudroom now").option("--json", "Print JSON").action(action(async (options: JsonOutputOptions) => {
+    await createCliBbSdk(getUrl()).cloudroom.checkPreviews();
+    if (!outputJson(options, { ok: true })) console.log("Checking now. Run room-cli cloud status in a few seconds for the result.");
   }));
   const codex = group.command("codex").description("Connect Codex on your cloud VM");
   codex.command("status").option("--json", "Print JSON").action(action(async (options: JsonOutputOptions) => {

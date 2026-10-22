@@ -184,6 +184,9 @@ const WORKING_ACTIVITY_ICONS = {
   goal: "Target",
 } satisfies Partial<Record<ThreadListIndicatorKind, IconName>>;
 
+const BACKGROUND_ACTIVITY_KINDS: ReadonlySet<ThreadListIndicatorKind> =
+  new Set(["workflow", "background-agent", "background-command"]);
+
 const WAITING_ICONS = {
   "waiting-for-input": "CircleQuestion",
   "queued-waiting": "Clock",
@@ -396,7 +399,7 @@ export function ThreadStatusGlyph({
         <Icon
           name={WORKING_ACTIVITY_ICONS[kind]}
           className={cn(
-            "animate-shine-icon",
+            !BACKGROUND_ACTIVITY_KINDS.has(kind) && "animate-shine-icon",
             SIDEBAR_WORKING_STATUS_COLOR_CLASS,
             COARSE_POINTER_ICON_SIZE_CLASS,
           )}

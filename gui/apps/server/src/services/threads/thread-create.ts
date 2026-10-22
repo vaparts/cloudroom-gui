@@ -1,9 +1,14 @@
 import { cloudExecution, cloudroom, isCloudThread } from "../cloudroom/commands.js";
+import { prepareLocalFork, prepareLocalForkCode } from "../cloudroom/teleport-local.js";
+import { FORK_HARNESSES, forkModel, forkTurn } from "../cloudroom/fork.js";
+import { messagesSeed } from "./thread-harness-switch.js";
+import { threadMessages } from "./thread-transcript.js";
 import { ensureProjectCheckoutForThread } from "../projects/project-source-setup.js";
 import { assertEnvironmentPathAvailable } from "../environments/path-admission.js";
 import {
   deleteThread,
   getEnvironment,
+  getLatestCompletedThreadContextClearSequence,
   getProjectSourceByHost,
   getThread,
 } from "@cloudroom/db";
@@ -520,8 +525,10 @@ export async function createThreadFromRequest(
   options: {
     providerInput?: ThreadCreateServiceRequestInput["input"];
     forkSourceEnvironmentId?: string;
+    freshFork?: true;
     importedFork?: ThreadForkPoint;
     importedText?: ImportedText;
+    forkPoint?: ThreadForkPoint;
   } = {},
 ) {
   const project = requirePublicProjectForThreadCreate(
@@ -531,8 +538,61 @@ export async function createThreadFromRequest(
   const sourceId = rawRequestInput.sourceThreadId ?? rawRequestInput.parentThreadId;
   const source = sourceId ? getThread(deps.db, sourceId) : null;
   const cloudChild = source !== null && isCloudThread(source) && !rawRequestInput.sourceThreadId && !rawRequestInput.originKind;
-  const cloudFork = source !== null && isCloudThread(source) && rawRequestInput.originKind === "fork" && Boolean(rawRequestInput.sourceThreadId);
-  if (source && isCloudThread(source) && !cloudChild && !cloudFork) {
+  const cloudSourceFork = source !== null && isCloudThread(source) && rawRequestInput.originKind === "fork" && Boolean(rawRequestInput.sourceThreadId);
+  const localFork = cloudSourceFork && rawRequestInput.executionTarget !== "cloud" && (rawRequestInput.executionTarget === "local" || rawRequestInput.environment.type !== "project-default");
+  const cloudFork = cloudSourceFork && !localFork;
+  const toCloud = rawRequestInput.executionTarget === "cloud" || (cloudSourceFork && !localFork);
+  const textFork = source !== null && rawRequestInput.originKind === "fork" && Boolean(rawRequestInput.sourceThreadId) && !options.importedText && (
+    (rawRequestInput.providerId !== undefined && rawRequestInput.providerId !== source.providerId) ||
+    (toCloud && rawRequestInput.model !== undefined && rawRequestInput.model !== forkModel(deps, source.id)) ||
+    (toCloud && !FORK_HARNESSES.includes(source.providerId)));
+  if (source !== null && textFork && rawRequestInput.sourceThreadId) {
+    if (toCloud && rawRequestInput.input.length === 0) {
+      throw new ApiError(400, "invalid_request", "A Cloud fork needs a first message");
+    }
+    requireLiveSourceThread(deps, { projectId: rawRequestInput.projectId, sourceThreadId: source.id });
+    assertValidParentThread(deps, { parentThreadId: source.id, cloudChild: isCloudThread(source) });
+    const { endSequence } = forkTurn(deps.db, source.id, rawRequestInput.sourceSeqEnd);
+    const cleared = getLatestCompletedThreadContextClearSequence(deps.db, { threadId: source.id });
+    const seed = await messagesSeed(
+      deps.config.dataDir,
+      source.projectId,
+      threadMessages(deps.db, source.id, { ...(cleared != null && cleared < endSequence ? { after: cleared } : {}), before: endSequence + 1 }),
+      (rawRequestInput.providerId ?? source.providerId) === source.providerId
+        ? `[Cloudroom] This conversation was forked from another thread. You are continuing it in a fresh ${source.providerId} session.`
+        : `[Cloudroom] This conversation was forked from a thread with another agent (${source.providerId}). You are now continuing it as ${rawRequestInput.providerId}.`,
+    );
+    if (toCloud) {
+      const { sourceSeqEnd: _sourceSeqEnd, ...cloudRequest } = rawRequestInput;
+      const sameHarness = (rawRequestInput.providerId ?? source.providerId) === source.providerId;
+      const model = rawRequestInput.model ?? (sameHarness ? forkModel(deps, source.id) : undefined);
+      const thread = await cloudroom(deps).create({ ...cloudRequest, providerId: rawRequestInput.providerId ?? source.providerId, ...(model ? { model } : {}), origin: rawRequestInput.origin ?? "sdk", originKind: "fork", environment: { type: "project-default" }, input: [...seed, ...rawRequestInput.input] }, false, { sourceThreadId: source.id, endSequence });
+      deps.telemetry.capture({ name: "thread_created", properties: { execution: cloudExecution(deps, thread.id), is_child_thread: false, provider: thread.providerId } });
+      return thread;
+    }
+    const code = isCloudThread(source) ? await prepareLocalForkCode(deps as AppDeps, source, null, rawRequestInput.environment) : null;
+    return createThreadFromRequest(deps, {
+      ...rawRequestInput,
+      executionTarget: "local",
+      environment: code?.environment ?? rawRequestInput.environment,
+      input: code && rawRequestInput.input.length > 0 ? [code.note, ...rawRequestInput.input] : rawRequestInput.input,
+    }, { ...options, importedText: { history: { kind: "thread", sourceThreadId: source.id, endSequence }, seed } });
+  }
+  if (localFork && !options.forkPoint && !options.importedText) {
+    requireLiveSourceThread(deps, { projectId: rawRequestInput.projectId, sourceThreadId: source.id });
+    assertValidParentThread(deps, { parentThreadId: source.id, cloudChild: true });
+    if (!deps.providerRegistry.supportsFork(source.providerId)) {
+      throw new ApiError(400, "invalid_request", `Provider ${source.providerId} does not support thread forks on this Mac`);
+    }
+    const prepared = await prepareLocalFork(deps as AppDeps, source, { environment: rawRequestInput.environment, ...(rawRequestInput.sourceSeqEnd === undefined ? {} : { sourceSeqEnd: rawRequestInput.sourceSeqEnd }) });
+    return createThreadFromRequest(deps, {
+      ...rawRequestInput,
+      executionTarget: "local",
+      environment: prepared.environment,
+      input: rawRequestInput.input.length > 0 ? [prepared.note, ...rawRequestInput.input] : rawRequestInput.input,
+    }, { ...options, forkPoint: prepared.fork });
+  }
+  if (source && isCloudThread(source) && !cloudChild && !cloudSourceFork) {
     throw new ApiError(409, "cloudroom_unsupported", "Only forks and child threads can start from a Cloud thread; native fallback is blocked.");
   }
   if (rawRequestInput.executionTarget === "cloud" || cloudChild || cloudFork) {
@@ -617,6 +677,7 @@ export async function createThreadFromRequest(
   if (originKind !== null && sourceThread !== null) {
     assertValidParentThread(deps, {
       parentThreadId: sourceThread.id,
+      cloudChild: options.forkPoint !== undefined || options.importedText !== undefined,
     });
   }
   if (originKind !== null && sourceThread === null) {
@@ -696,7 +757,7 @@ export async function createThreadFromRequest(
   } = requestInput;
   const requestedEnvironment = await resolveCreateThreadEnvironment(deps, {
     parentThread:
-      forkSourceEnvironmentId !== undefined
+      forkSourceEnvironmentId !== undefined || options.forkPoint !== undefined || options.importedText !== undefined
         ? null
         : (sourceThread ?? parentThread),
     projectId: requestInput.projectId,
@@ -802,16 +863,18 @@ export async function createThreadFromRequest(
       requestedEnvironment: request.environment,
     });
 
-  const fork =
-    options.importedFork ??
-    resolveForkPoint(deps, {
+  const fork = options.freshFork
+    ? null
+    : (options.importedFork ??
+    options.forkPoint ??
+    (options.importedText ? null : resolveForkPoint(deps, {
       originKind: request.originKind ?? null,
       providerId: request.providerId,
       sourceSeqEnd: request.sourceSeqEnd,
       sourceThread,
-    });
+    })));
 
-  if (request.originKind !== null && fork === null) {
+  if (request.originKind !== null && fork === null && !options.importedText && !options.freshFork) {
     throw new ApiError(
       400,
       "fork_source_session_unavailable",
@@ -822,7 +885,7 @@ export async function createThreadFromRequest(
   const createArgs = {
     deferFork:
       options.importedFork !== undefined ||
-      options.importedText !== undefined,
+      (options.importedText !== undefined && request.originKind !== "fork"),
     environmentId,
     environmentIntent,
     executionDefaults: resolvedExecutionDefaults,

@@ -48,6 +48,7 @@ import {
   CLOUDROOM_LOCAL_WORKTREE,
 } from "@/lib/cloudroom-environment-label";
 import { usePromptModePermissionDisplay } from "@/components/promptbox/usePromptModePermissionDisplay";
+import { PROMPT_PLACEHOLDER_HINT } from "@/components/promptbox/follow-up-placeholder";
 import { usePromptVoice } from "@/components/promptbox/usePromptVoice";
 import { useOptionalPaneContext } from "@/views/thread-detail/PaneContext";
 import {
@@ -209,11 +210,7 @@ function promptLocationCommands(
   return commands.length > 0 ? commands : undefined;
 }
 
-function getNewThreadPromptPlaceholder(isProjectless: boolean): string {
-  return isProjectless
-    ? "Ask anything."
-    : "Ask anything. @ to mention files, folders, or sections";
-}
+const NEW_THREAD_PROMPT_PLACEHOLDER = "Build anything...";
 
 export const NewThreadPromptBoxUI = memo(function NewThreadPromptBoxUI({
   id,
@@ -339,8 +336,11 @@ const DefaultNewThreadComposer = memo(function DefaultNewThreadComposer({
   onComposerLayoutChange,
 }: DefaultNewThreadComposerProps) {
   const isProjectlessPrompt = project?.value === null;
-  const placeholder =
-    placeholderOverride ?? getNewThreadPromptPlaceholder(isProjectlessPrompt);
+  const placeholder = placeholderOverride ?? NEW_THREAD_PROMPT_PLACEHOLDER;
+  const placeholderHint =
+    placeholderOverride === undefined && !isProjectlessPrompt
+      ? PROMPT_PLACEHOLDER_HINT
+      : undefined;
   const { permissionDisplayOverride, permissionPickerDisabledByPlanMode } =
     usePromptModePermissionDisplay({
       execution,
@@ -419,6 +419,7 @@ const DefaultNewThreadComposer = memo(function DefaultNewThreadComposer({
         editorLayout="root-compose"
         minHeight={NEW_THREAD_PROMPT_BOX_MIN_HEIGHT}
         placeholder={placeholder}
+        placeholderHint={placeholderHint}
         header={modeConfig.header}
         footerStart={<ExecutionControls {...execution} />}
       />

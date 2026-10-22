@@ -145,6 +145,7 @@ interface NewThreadComposerLocks {
   project?: boolean;
   provider?: boolean;
   environment?: boolean;
+  baseBranch?: boolean;
 }
 
 interface NewThreadComposerPromptOptions {
@@ -1829,7 +1830,7 @@ export function NewThreadComposer({
             environmentProviderInputsSlot,
             machineProviderInputsSlot: machineProviderInputs.control,
             cloudInputsSlot:
-              cloudBranchPickerShown && projectId !== null ? (
+              cloudBranchPickerShown && !locks.baseBranch && projectId !== null ? (
                 <CloudBranchPicker
                   projectId={projectId}
                   hostId={primaryHostId}

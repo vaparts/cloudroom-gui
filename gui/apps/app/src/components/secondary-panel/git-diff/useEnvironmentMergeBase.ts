@@ -26,6 +26,7 @@ interface UseEnvironmentMergeBaseParams {
 type MergeBaseBranchChangeHandler = (branch: string) => void;
 
 interface ShouldSyncSelectedMergeBaseBranchParams {
+  hasPersistedMergeBase?: boolean;
   previousStateKey?: string;
   nextStateKey?: string;
   persistedMergeBaseBranch?: string | null;
@@ -55,6 +56,7 @@ function normalizeSelectedMergeBaseBranch(
 }
 
 export function shouldSyncSelectedMergeBaseBranch({
+  hasPersistedMergeBase = true,
   previousStateKey,
   nextStateKey,
   persistedMergeBaseBranch,
@@ -65,7 +67,7 @@ export function shouldSyncSelectedMergeBaseBranch({
     return true;
   }
 
-  if (updatePending) {
+  if (!hasPersistedMergeBase || updatePending) {
     return false;
   }
 
@@ -146,6 +148,7 @@ export function useEnvironmentMergeBase({
   useEffect(() => {
     if (
       !shouldSyncSelectedMergeBaseBranch({
+        hasPersistedMergeBase: thread?.executionTarget !== "cloud",
         previousStateKey: mergeBaseStateKeyRef.current,
         nextStateKey: mergeBaseStateKey,
         persistedMergeBaseBranch: environment?.mergeBaseBranch,
@@ -166,6 +169,7 @@ export function useEnvironmentMergeBase({
     mergeBaseStateKey,
     selectedMergeBaseBranch,
     setSelectedMergeBaseBranch,
+    thread?.executionTarget,
   ]);
 
   const effectiveMergeBaseBranch = resolveEffectiveMergeBaseBranch({
@@ -188,6 +192,9 @@ export function useEnvironmentMergeBase({
   const handleMergeBaseBranchChange: MergeBaseBranchChangeHandler = useCallback(
     (branch) => {
       if (!environment || !thread?.environmentId) {
+        if (thread?.executionTarget === "cloud") {
+          setSelectedMergeBaseBranch(branch.trim());
+        }
         return;
       }
 

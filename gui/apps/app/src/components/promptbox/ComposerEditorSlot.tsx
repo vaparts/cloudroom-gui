@@ -27,6 +27,8 @@ export function ComposerEditorSlot({
   scrollContainerRef,
   inputLocked,
   isCompactLayout,
+  placeholder,
+  placeholderHint,
   minHeight,
   layout,
   resolveMentionLink,
@@ -35,6 +37,8 @@ export function ComposerEditorSlot({
   scrollContainerRef: RefObject<HTMLDivElement | null>;
   inputLocked: boolean;
   isCompactLayout: boolean;
+  placeholder: string;
+  placeholderHint: string | undefined;
   minHeight: number;
   layout: ComposerEditorLayout;
   resolveMentionLink: PromptMentionLinkResolver | undefined;
@@ -45,7 +49,7 @@ export function ComposerEditorSlot({
       data-promptbox-editor-scroll=""
       aria-busy={inputLocked || undefined}
       className={cn(
-        "w-full overflow-y-auto bg-transparent px-4 pb-1 pr-14 pt-3 outline-none",
+        "relative w-full overflow-y-auto bg-transparent px-4 pb-1 pr-14 pt-3 outline-none",
         COARSE_POINTER_TEXT_BASE_CLASS,
         "leading-relaxed",
         isCompactLayout && "h-12 overflow-hidden pb-0 pr-14 pt-0",
@@ -58,6 +62,18 @@ export function ComposerEditorSlot({
           : COMPOSER_EDITOR_MAX_HEIGHT_BY_LAYOUT[layout],
       }}
     >
+      {placeholderHint ? (
+        <div
+          aria-hidden
+          data-promptbox-placeholder-hint=""
+          className="pointer-events-none absolute left-4 right-14 top-3 select-none whitespace-pre-wrap break-words font-light leading-[1.7]"
+        >
+          <span className="invisible">{placeholder}</span>
+          <span className="ml-3 text-subtle-foreground opacity-50 dark:opacity-40">
+            {placeholderHint}
+          </span>
+        </div>
+      ) : null}
       <PromptMentionLinkContext.Provider value={resolveMentionLink ?? null}>
         <EditorContent
           editor={editor}

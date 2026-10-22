@@ -12,13 +12,15 @@ import {
   createQueuedThreadMessageInTransaction,
   findProjectEnvironmentByHostPath,
   getEnvironment,
+  getProject,
   getThread,
   listProjectSourcesByHost,
   listProjectSourcesByProjectIds,
   threadPluginMetadata,
   threads,
 } from "@cloudroom/db";
-import { PERSONAL_PROJECT_ID, type TeleportLocalStep, type Thread } from "@cloudroom/domain";
+import { PERSONAL_PROJECT_ID, type PromptInput, type TeleportLocalStep, type Thread } from "@cloudroom/domain";
+import type { CreateThreadEnvironmentArgs } from "@cloudroom/server-contract";
 import type { AppDeps } from "../../types.js";
 import { ApiError } from "../../errors.js";
 import { resolvePrimaryHostId } from "../hosts/primary-host.js";
@@ -26,11 +28,17 @@ import { runLiveHostCommand } from "../hosts/live-command.js";
 import { workspaceContextFromPath } from "../environments/workspace-command-target.js";
 import { provisionUnmanagedEnvironmentForPath } from "../threads/thread-environment-directory.js";
 import { getLastProviderThreadId } from "../threads/thread-events.js";
+import type { ThreadForkPoint } from "../threads/thread-fork-history.js";
+import { worktreeProviderInputs } from "../threads/thread-environment-placement.js";
+import { ensureProjectCheckoutForThread } from "../projects/project-source-setup.js";
+import { resolveStableThreadRequestEnvironment } from "../threads/thread-request-eligibility.js";
+import { DEFAULT_ENVIRONMENT_PROVIDER_ID } from "../environments/environment-provider-ids.js";
 import { requestQueuedMessageDispatch } from "../threads/queued-message-dispatch.js";
 import { requireThreadStoragePath } from "../threads/thread-storage.js";
 import { cloudroom } from "./commands.js";
 import type { CloudroomClient } from "./client.js";
 import { SKIPPED } from "./project-copy.js";
+import { cloudForkPoint, FORK_HARNESSES, isFiles, localCheckpoint, sourceCode } from "./fork.js";
 import { binding, localTeleports, teleportProgress } from "./store.js";
 
 type Harness = "codex" | "pi" | "claude-code" | "acp-cursor" | "acp-opencode";
@@ -126,6 +134,109 @@ async function run(deps: AppDeps, threadId: string, step: (value: TeleportLocalS
   await client.close(saved.sessionId, randomUUID()).catch((error: unknown) =>
     deps.logger.warn({ threadId, error }, "Cloud session did not close after Teleport to Local"));
   return { conflicts };
+}
+
+function requireThisMac(deps: AppDeps, requested: CreateThreadEnvironmentArgs): void {
+  const target = requested.type === "reuse" ? getEnvironment(deps.db, requested.environmentId)?.hostId
+    : requested.type === "host" ? requested.hostId
+    : requested.type === "provider" ? requested.machine && (requested.machine.type === "existing" ? requested.machine.hostId : "new") : undefined;
+  if (target !== undefined && target !== resolvePrimaryHostId(deps))
+    throw new ApiError(409, "fork_unavailable", "A Cloud thread forks to Local only on this Mac. Pick a folder or worktree on this Mac.");
+}
+
+export async function prepareLocalFork(deps: AppDeps, source: Thread, request: { sourceSeqEnd?: number; environment: CreateThreadEnvironmentArgs }): Promise<{ fork: ThreadForkPoint; environment: CreateThreadEnvironmentArgs; note: PromptInput }> {
+  requireThisMac(deps, request.environment);
+  const saved = binding(deps.db, source.id);
+  const harness = source.providerId as Harness;
+  if (!saved?.sessionId || !saved.nativeId || !/^[A-Za-z0-9_-]+$/.test(saved.nativeId) || !FORK_HARNESSES.includes(harness))
+    throw new ApiError(409, "fork_source_unavailable", "Only a started Claude Code or Codex Cloud thread can be forked to this Mac.");
+  const point = cloudForkPoint(deps.db, source, request.sourceSeqEnd);
+  const client = await cloudroom(deps).threadClient(source.id);
+  const vmPath = (await vm(client, findNative(harness, saved.nativeId))).toString().trim();
+  if (!vmPath) throw new ApiError(409, "fork_source_unavailable", "The source conversation file was not found in its sandbox.");
+  const lineage = harness === "codex" ? await codexLineage(client, vmPath) : [];
+  const [file, parents] = await Promise.all([download(client, vmPath), Promise.all(lineage.map((path) => download(client, path)))]);
+  const session = file.subarray(0, file.lastIndexOf(10) + 1);
+  const checkpoint = localCheckpoint(harness, session, point);
+  const folder = await localForkFolder(deps, source);
+  const inUse = (id: string) => deps.db.select({ id: threads.id }).from(threads)
+    .where(and(eq(threads.providerId, "codex"), eq(threads.executionTarget, "local"), isNull(threads.archivedAt), isNull(threads.deletedAt))).all()
+    .some((row) => getLastProviderThreadId(deps, row.id) === id);
+  for (const [index, path] of lineage.entries()) await installNative("codex", "", path, parents[index]!, folder, inUse);
+  const nativeId = harness === "claude-code" ? randomUUID() : saved.nativeId;
+  const data = harness === "claude-code" ? Buffer.from(session.toString("utf8").split("\n").map((line) => line && JSON.stringify({ ...JSON.parse(line), sessionId: nativeId })).join("\n")) : session;
+  await installNative(harness, nativeId, vmPath, data, folder);
+  return {
+    fork: { descriptor: { sourceProviderThreadId: nativeId, ...(checkpoint ? { sourceProviderCheckpointId: checkpoint } : {}) }, history: { kind: "thread", sourceThreadId: source.id, endSequence: point.end_sequence } },
+    ...(await prepareLocalForkCode(deps, source, folder, request.environment)),
+  };
+}
+
+export async function prepareLocalForkCode(deps: AppDeps, source: Thread, folder: string | null, requested: CreateThreadEnvironmentArgs): Promise<{ environment: CreateThreadEnvironmentArgs; note: PromptInput }> {
+  requireThisMac(deps, requested);
+  const saved = binding(deps.db, source.id);
+  if (!saved?.sessionId) throw new ApiError(409, "fork_source_unavailable", "The source Cloud thread has not started yet.");
+  const client = await cloudroom(deps).threadClient(source.id);
+  const cloud = await client.sessionWorkspace(saved.sessionId);
+  const code = await landLocalForkCode(deps, client, source, cloud.path, folder ?? await localForkFolder(deps, source), requested);
+  return {
+    environment: code.environment,
+    note: { type: "text", text: `[Local fork]\nThis conversation was forked from a Cloud thread and now runs on the user's Mac. ${code.note}`, mentions: [], visibility: "agent-only" },
+  };
+}
+
+async function localForkFolder(deps: AppDeps, source: Thread): Promise<string> {
+  const hostId = resolvePrimaryHostId(deps);
+  const project = getProject(deps.db, source.projectId);
+  if (hostId && project) await ensureProjectCheckoutForThread(deps, { project, hostId });
+  return (await localEnvironment(deps, source).catch((error: unknown) => {
+    throw error instanceof ApiError && error.body.code === "teleport_unavailable"
+      ? new ApiError(409, "fork_unavailable", "This project has no folder on this Mac and no GitHub repo to clone. Add its folder here, or fork to Cloud.")
+      : error;
+  })).path;
+}
+
+async function landLocalForkCode(deps: AppDeps, client: CloudroomClient, source: Thread, cloudPath: string, folder: string, requested: CreateThreadEnvironmentArgs): Promise<{ environment: CreateThreadEnvironmentArgs; note: string }> {
+  const id = randomUUID().replaceAll("-", "").slice(0, 12);
+  if (requested.type === "reuse" || requested.type === "host") resolveStableThreadRequestEnvironment(deps, { environment: requested, projectId: source.projectId });
+  const inputs = requested.type === "provider" ? requested.inputs as { path?: string; branch?: { kind?: string } | null } | null : null;
+  const switching = requested.type === "host"
+    ? requested.workspace.type === "unmanaged" && requested.workspace.branch !== undefined
+    : requested.type === "provider" && requested.environmentProviderId === DEFAULT_ENVIRONMENT_PROVIDER_ID.projectCheckout && inputs?.branch != null;
+  const checkout = requested.type === "provider" && requested.environmentProviderId === DEFAULT_ENVIRONMENT_PROVIDER_ID.projectCheckout && !switching
+    ? inputs?.path ?? folder : null;
+  const path = requested.type === "reuse" ? getEnvironment(deps.db, requested.environmentId)?.path
+    : requested.type === "host" && requested.workspace.type === "unmanaged" && !switching ? requested.workspace.path ?? folder
+    : checkout;
+  if (path) {
+    const changes = await cloudChanges(client, cloudPath, await git(path, ["rev-parse", "HEAD"]), source.createdAt);
+    const conflicts = await applyChanges(path, changes.archive, id, changes.base);
+    return { environment: requested, note: `Cloudroom copied the files the Cloud thread changed into this folder.${conflicts ? ` ${conflicts} of them also changed here, so the Cloud copies are in .cloudroom/teleport/${id}/.` : ""}` };
+  }
+  const personal = source.projectId === PERSONAL_PROJECT_ID || (requested.type === "host" && requested.workspace.type === "personal")
+    || (requested.type === "provider" && requested.environmentProviderId === DEFAULT_ENVIRONMENT_PROVIDER_ID.personalWorkspace);
+  const named = (requested.type === "host" && requested.workspace.type === "managed-worktree" && requested.workspace.baseBranch.kind === "named")
+    || (requested.type === "provider" && requested.environmentProviderId === DEFAULT_ENVIRONMENT_PROVIDER_ID.gitWorktree && inputs?.branch?.kind === "named");
+  const hostId = resolvePrimaryHostId(deps);
+  const bundle = personal || named || switching || !hostId || (await git(folder, ["rev-parse", "--git-dir"])) === null ? null : await sourceCode(client, cloudPath, id).then((code) => code && !isFiles(code.data) ? code.data : null);
+  if (!bundle) return { environment: requested, note: "The Cloud thread's code was not copied here." };
+  const branch = `cloudroom/fork-${id}`;
+  const temporary = await mkdtemp(join(tmpdir(), "cloudroom-fork-"));
+  try {
+    const file = join(temporary, "code.bundle");
+    await writeFile(file, bundle);
+    const fetch = () => exec("git", ["-C", folder, "fetch", "-q", file, `refs/cloudroom/${id}:refs/heads/${branch}`]);
+    await fetch().catch(async () => { await exec("git", ["-C", folder, "fetch", "-q", "origin"]).catch(() => {}); await fetch(); });
+  } catch (error) {
+    const reason = error instanceof Error && "stderr" in error ? String(error.stderr).trim() : "";
+    throw new ApiError(409, "fork_code_unavailable", `The Cloud thread's code could not be copied to this Mac: ${reason || "git fetch failed"}`);
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
+  return {
+    environment: { type: "provider", environmentProviderId: DEFAULT_ENVIRONMENT_PROVIDER_ID.gitWorktree, machine: { type: "existing", hostId: hostId! }, inputs: worktreeProviderInputs({ kind: "named", name: branch }) },
+    note: `It runs in a new worktree based on branch ${branch}, which holds the Cloud thread's code. The last commit, "Cloudroom fork: uncommitted changes", holds the work the Cloud thread had not committed.`,
+  };
 }
 
 /** Copies the cloud thread's branch and its commits into the Mac project as a local branch. The agent keeps

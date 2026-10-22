@@ -37,6 +37,7 @@
     "bb-plugin-push-notifications": "workspace:*",
     "bb-plugin-scheduled-send": "workspace:*",
     "bb-plugin-secrets": "workspace:*",
+    "bb-plugin-organization": "workspace:*",
     "bb-plugin-time-in-cloudroom": "workspace:*",
     "bb-plugin-side-chat": "workspace:*",
     "bb-plugin-simple-notes": "workspace:*",

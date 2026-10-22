@@ -1,10 +1,18 @@
+import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { basename } from "node:path";
+import { promisify } from "node:util";
 import { and, asc, eq } from "drizzle-orm";
-import { events, findLastCompletedRootStoredTurn, findLastRootStoredTurnStarted, getThread, listStoredTurnCompletedRowsByTurnIds, type DbConnection } from "@cloudroom/db";
+import { events, findLastCompletedRootStoredTurn, findLastRootStoredTurnStarted, getEnvironment, getThread, listStoredTurnCompletedRowsByTurnIds, type DbConnection } from "@cloudroom/db";
 import type { Thread } from "@cloudroom/domain";
 import { z } from "zod";
+import type { AppDeps } from "../../types.js";
 import { ApiError } from "../../errors.js";
+import { resolveThreadForkPoint } from "../threads/thread-fork-history.js";
+import { getLastExecutionOptions } from "../threads/thread-events.js";
+import { runLiveHostCommand } from "../hosts/live-command.js";
+import { resolvePrimaryHostId } from "../hosts/primary-host.js";
+import { workspaceContextFromPath } from "../environments/workspace-command-target.js";
 import { CloudroomError, UPLOAD_PART, type CloudroomClient, type Harness, type TeleportManifest } from "./client.js";
 import { cloudroom } from "./commands.js";
 import { SKIPPED } from "./project-copy.js";
@@ -19,12 +27,13 @@ export const cloudForkSchema = z.object({
   before: z.string().optional(),
   last_turn_id: z.string().optional(),
   transfer: z.string().optional(),
+  local: z.object({ native_id: z.string(), checkpoint: z.string().optional() }).optional(),
 });
 export type CloudFork = z.infer<typeof cloudForkSchema>;
 /** A thread's code: a Git bundle, or a .tgz of its files when its folder has no Git history, plus its `origin` URL.
  *  `full` packs a complete bundle, for a folder without the commits a thin bundle leaves out. */
 type Code = { data: Buffer; origin: string; full?: () => Promise<Buffer> };
-const isFiles = (data: Buffer) => data[0] === 0x1f && data[1] === 0x8b;
+export const isFiles = (data: Buffer) => data[0] === 0x1f && data[1] === 0x8b;
 const skippedNames = () => [...SKIPPED, ".cloudroom"].map((name) => `-name ${quote(name)}`).join(" -o ");
 /** `applyForkCode`'s exit code when the folder lacks history the bundle needs. */
 const MISSING_HISTORY = 3;
@@ -45,21 +54,29 @@ for n in names:
 `;
 
 export const FORK_HARNESSES: readonly string[] = ["claude-code", "codex"];
-export const FORK_HINT = "[Cloud fork]\nThis conversation was forked from another Cloud thread and now runs in its own new sandbox. Cloudroom is copying that thread's code (its commits and uncommitted changes) into this folder. Run `room-cli files wait` before you read or change files; it returns once the code lands. Never recreate missing files.";
+export const FORK_HINT = "[Cloud fork]\nThis conversation was forked from another thread and now runs in its own new sandbox. Cloudroom is copying that thread's code (its commits and uncommitted changes) into this folder. Run `room-cli files wait` before you read or change files; it returns once the code lands. Never recreate missing files.";
 // Core takes teleport uploads in 1 MB parts.
 const PART = 1024 * 1024;
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+const exec = promisify(execFile);
 
 export function cloudForkOf(input: string | undefined): CloudFork | null {
   const fork = input ? (JSON.parse(input) as { fork?: unknown }).fork : undefined;
   return fork ? cloudForkSchema.parse(fork) : null;
 }
 
+export function forkTurn(db: DbConnection, threadId: string, sourceSeqEnd: number | undefined): { turnId: string; endSequence: number } {
+  const started = sourceSeqEnd === undefined ? findLastCompletedRootStoredTurn(db, { threadId }) : findLastRootStoredTurnStarted(db, { threadId, atOrBeforeSequence: sourceSeqEnd });
+  const completed = started && listStoredTurnCompletedRowsByTurnIds(db, { threadId, turnIds: [started.turnId] }).at(-1);
+  if (!started || !completed) throw new ApiError(400, "fork_source_session_unavailable", "Fork from a message whose turn has finished.");
+  return { turnId: started.turnId, endSequence: completed.sequence };
+}
+
 /** Keeps the turn holding `sourceSeqEnd` (or the last finished turn) and everything before it, like a Local fork. */
 export function cloudForkPoint(db: DbConnection, source: Thread, sourceSeqEnd: number | undefined): CloudFork {
-  const started = sourceSeqEnd === undefined ? findLastCompletedRootStoredTurn(db, { threadId: source.id }) : findLastRootStoredTurnStarted(db, { threadId: source.id, atOrBeforeSequence: sourceSeqEnd });
-  const completed = started && listStoredTurnCompletedRowsByTurnIds(db, { threadId: source.id, turnIds: [started.turnId] }).at(-1);
-  if (!started || !completed) throw new ApiError(400, "fork_source_session_unavailable", "Fork from a message whose turn has finished.");
+  const turn = forkTurn(db, source.id, sourceSeqEnd);
+  const completed = { sequence: turn.endSequence };
+  const started = { turnId: turn.turnId };
   const checkpoints = db.select({ sequence: events.sequence, data: events.data }).from(events)
     .where(and(eq(events.threadId, source.id), eq(events.type, "system/operation"))).orderBy(asc(events.sequence)).all()
     .map((row) => ({ sequence: row.sequence, ...(JSON.parse(row.data) as { operation?: string; metadata?: { id?: unknown; request_id?: unknown } }) }))
@@ -76,20 +93,31 @@ export function cloudForkPoint(db: DbConnection, source: Thread, sourceSeqEnd: n
   return next ? { ...fork, before: next.metadata!.id as string } : fork;
 }
 
+type ForkFile = { path: string; kind: "native" | "lineage"; data: Buffer };
+type ForkSource = { nativeId: string; files: (transfer: string) => Promise<ForkFile[]>; code: (id: string) => Promise<Code | null> };
+const asError = (error: unknown) => error instanceof Error ? error : new Error(String(error));
+
+export function localForkPoint(deps: Pick<AppDeps, "db" | "providerRegistry">, source: Thread, sourceSeqEnd: number | undefined): CloudFork {
+  const point = resolveThreadForkPoint(deps, { sourceSeqEnd: sourceSeqEnd ?? forkTurn(deps.db, source.id, undefined).endSequence, sourceThread: source });
+  const nativeId = point?.descriptor.sourceProviderThreadId;
+  if (point?.history?.kind !== "thread" || !nativeId || !/^[A-Za-z0-9_-]+$/.test(nativeId))
+    throw new ApiError(400, "fork_source_session_unavailable", "Fork from a message whose turn has finished.");
+  const checkpoint = point.descriptor.sourceProviderCheckpointId;
+  return { source_thread_id: source.id, end_sequence: point.history.endSequence, local: { native_id: nativeId, ...(checkpoint ? { checkpoint } : {}) } };
+}
+
 /** Copies the source conversation into this thread's new sandbox and waits until its agent is ready. The code
  *  snapshot starts at the same time and is applied once the project copy lands (`landForkCode`). */
 export async function startCloudFork(
   deps: Parameters<typeof cloudroom>[0], client: CloudroomClient, threadId: string, fork: CloudFork,
   start: Omit<TeleportManifest, "request_id" | "harness" | "native_id" | "files" | "handoff" | "queued" | "fork">,
-  saveTransfer: (id: string) => void,
+  save: (patch: Partial<CloudFork>) => void,
 ): Promise<{ sessionId: string; transfer: string; code: Promise<Code | Error | null> }> {
-  const source = binding(deps.db, fork.source_thread_id);
   const harness = getThread(deps.db, fork.source_thread_id)?.providerId;
-  if (!source?.sessionId || !source.nativeId || !/^[A-Za-z0-9_-]+$/.test(source.nativeId) || !harness || !FORK_HARNESSES.includes(harness))
-    throw new ApiError(409, "fork_source_unavailable", "The source Cloud thread has no saved conversation to fork.");
-  const from = await cloudroom(deps).threadClient(fork.source_thread_id);
-  const workspace = (await from.sessionWorkspace(source.sessionId)).path;
-  const snapshot = (id: string) => sourceCode(from, workspace, id).catch((error: unknown) => error instanceof Error ? error : new Error(String(error)));
+  if (!harness || !FORK_HARNESSES.includes(harness))
+    throw new ApiError(409, "fork_source_unavailable", "The source thread has no saved conversation to fork.");
+  const source = fork.local ? localForkSource(deps, fork.source_thread_id, fork.local.native_id, harness) : await cloudForkSource(deps, fork.source_thread_id, harness);
+  const snapshot = (id: string) => source.code(id).catch(asError);
   // A retry after activation keeps the started fork instead of starting a second one. Only Core's own "not found"
   // proves the saved transfer never started: a timeout (Core busy loading a big conversation) retries later, since a
   // second copy of the same conversation is always rejected.
@@ -103,21 +131,15 @@ export async function startCloudFork(
   }
   const transfer = `fork_${randomUUID().replaceAll("-", "")}`;
   const code = snapshot(transfer);
-  const path = (await vm(from, findNative(harness as "codex" | "claude-code", source.nativeId))).toString().trim();
-  if (!path) throw new ApiError(409, "fork_source_unavailable", "The source conversation file was not found in its sandbox.");
-  const file = await download(from, path);
-  // The source may be writing its next turn; a partial last line is not part of the fork.
-  const files: { path: string; kind: "native" | "lineage"; data: Buffer }[] = [{ path, kind: "native", data: file.subarray(0, file.lastIndexOf(10) + 1) }];
-  // A source that is itself a Codex fork (a rewind) needs its parent files too.
-  for (const parent of harness === "codex" ? await codexLineage(from, path) : [])
-    files.push({ path: parent, kind: "lineage", data: await download(from, parent) });
-  if (files.length > 1 && (await client.capabilities()).teleport_lineage !== true)
+  const files = await source.files(transfer);
+  if (files.some((entry) => entry.kind === "lineage") && (await client.capabilities()).teleport_lineage !== true)
     throw new ApiError(409, "fork_update", "Forking this Codex chat needs a newer cloud core. Try again after the next Cloudroom update.");
+  const native = files.find((entry) => entry.kind === "native")!.data;
+  save({ transfer, ...(fork.local ? corePoint(harness, native, fork.local.checkpoint) : {}) });
   const entries = files.map((entry) => ({ ...entry, sha256: createHash("sha256").update(entry.data).digest("hex") }));
-  saveTransfer(transfer);
   await client.prepareTeleport({
     ...start, request_id: transfer, harness: harness as Harness, native_id: source.nativeId, handoff: "", queued: [], fork: true,
-    files: entries.map((entry) => ({ path: basename(entry.path), size: entry.data.length, sha256: entry.sha256, kind: entry.kind, executable: false })),
+    files: entries.map((entry) => ({ path: entry.path, size: entry.data.length, sha256: entry.sha256, kind: entry.kind, executable: false })),
   });
   for (const [index, entry] of entries.entries())
     for (let offset = 0; offset < entry.data.length; offset += PART)
@@ -128,6 +150,100 @@ export async function startCloudFork(
   return { sessionId, transfer, code };
 }
 
+async function cloudForkSource(deps: Parameters<typeof cloudroom>[0], sourceId: string, harness: string): Promise<ForkSource> {
+  const source = binding(deps.db, sourceId);
+  if (!source?.sessionId || !source.nativeId || !/^[A-Za-z0-9_-]+$/.test(source.nativeId))
+    throw new ApiError(409, "fork_source_unavailable", "The source Cloud thread has no saved conversation to fork.");
+  const { sessionId, nativeId } = source;
+  const from = await cloudroom(deps).threadClient(sourceId);
+  const workspace = (await from.sessionWorkspace(sessionId)).path;
+  return {
+    nativeId,
+    code: (id) => sourceCode(from, workspace, id),
+    files: async () => {
+      const path = (await vm(from, findNative(harness as "codex" | "claude-code", nativeId))).toString().trim();
+      if (!path) throw new ApiError(409, "fork_source_unavailable", "The source conversation file was not found in its sandbox.");
+      const file = await download(from, path);
+      // The source may be writing its next turn; a partial last line is not part of the fork.
+      const files: ForkFile[] = [{ path: basename(path), kind: "native", data: file.subarray(0, file.lastIndexOf(10) + 1) }];
+      // A source that is itself a Codex fork (a rewind) needs its parent files too.
+      for (const parent of harness === "codex" ? await codexLineage(from, path) : [])
+        files.push({ path: basename(parent), kind: "lineage", data: await download(from, parent) });
+      return files;
+    },
+  };
+}
+
+function localForkSource(deps: Parameters<typeof cloudroom>[0], sourceId: string, nativeId: string, harness: string): ForkSource {
+  const environmentId = getThread(deps.db, sourceId)?.environmentId;
+  const environment = environmentId ? getEnvironment(deps.db, environmentId) : null;
+  if (!environment?.path) throw new ApiError(409, "fork_source_unavailable", "The source thread's folder is not on this Mac.");
+  const { hostId, path } = environment;
+  const target = { threadId: sourceId, environmentId: environment.id, workspaceContext: workspaceContextFromPath({ path }) };
+  return {
+    nativeId,
+    code: async (id) => hostId === resolvePrimaryHostId(deps as AppDeps) ? localCode(path, id) : null,
+    files: async (transferId) => {
+      const run = (command: { action: "capture" | "read"; sessions?: { threadId: string; nativeId: string; harness: "codex" | "claude-code" }[]; keepImages?: boolean; index?: number; offset?: number }) => runLiveHostCommand(deps as AppDeps, { hostId, timeoutMs: 120_000, command: { type: "thread.teleport", transferId, ...target, ...command } });
+      const capture = await run({ action: "capture", keepImages: true, sessions: [{ threadId: sourceId, nativeId, harness: harness === "codex" ? "codex" : "claude-code" }] });
+      const files: ForkFile[] = [];
+      for (const [index, file] of (capture.files ?? []).entries()) {
+        if (file.kind !== "native" && file.kind !== "lineage") continue;
+        const parts: Buffer[] = [];
+        for (let offset = 0, waits = 0; ;) {
+          const chunk = await run({ action: "read", index, offset });
+          if (chunk.pending) {
+            if (++waits > 20) throw new ApiError(503, "fork_source_busy", `${file.path} kept changing. Try the fork again.`);
+            await new Promise((resolve) => setTimeout(resolve, 500));
+            continue;
+          }
+          if (chunk.data === undefined || chunk.size === undefined) throw new Error("A local transfer chunk is missing.");
+          const data = Buffer.from(chunk.data, "base64");
+          parts.push(data);
+          offset += data.length;
+          if (offset >= chunk.size || data.length === 0) break;
+        }
+        files.push({ path: file.path, kind: file.kind, data: Buffer.concat(parts) });
+      }
+      if (!files.some((file) => file.kind === "native")) throw new ApiError(409, "fork_source_unavailable", "The source conversation was not captured.");
+      return files;
+    },
+  };
+}
+
+const lines = (native: Buffer) => native.toString("utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as { type?: string; uuid?: string; parentUuid?: string | null; isMeta?: boolean });
+const prompt = (entry: ReturnType<typeof lines>[number]) => entry.type === "user" && entry.isMeta !== true;
+
+export function corePoint(harness: string, native: Buffer, checkpoint: string | undefined): Pick<CloudFork, "before" | "last_turn_id"> {
+  if (!checkpoint) return {};
+  if (harness === "codex") return { last_turn_id: checkpoint.replace(/^bt[0-9a-f]{8}-\d+-/, "") };
+  const entries = lines(native);
+  const byId = new Map(entries.map((entry) => [entry.uuid, entry]));
+  if (!byId.has(checkpoint)) throw new ApiError(409, "fork_source_session_unavailable", "That message is not in the saved conversation.");
+  const after = entries.find((entry) => {
+    if (!prompt(entry)) return false;
+    for (let id = entry.parentUuid; id; id = byId.get(id)?.parentUuid) {
+      if (id === checkpoint) return true;
+      const parent = byId.get(id);
+      if (!parent || prompt(parent)) return false;
+    }
+    return false;
+  });
+  return after?.uuid ? { before: after.uuid } : {};
+}
+
+export function localCheckpoint(harness: string, native: Buffer, fork: Pick<CloudFork, "before" | "last_turn_id">): string | undefined {
+  if (harness === "codex") return fork.last_turn_id;
+  if (!fork.before) return undefined;
+  const parent = lines(native).find((entry) => entry.uuid === fork.before && prompt(entry))?.parentUuid;
+  if (!parent) throw new ApiError(409, "fork_source_session_unavailable", "That message is not in the saved conversation.");
+  return parent;
+}
+
+export function forkModel(deps: Pick<AppDeps, "db">, threadId: string): string | undefined {
+  return binding(deps.db, threadId)?.model ?? getLastExecutionOptions(deps, threadId)?.model;
+}
+
 export const CHILD_HINT = "[Cloud child]\nYou run in your own sandbox. Cloudroom is copying your parent thread's code (its commits and uncommitted changes) into this folder. Run `room-cli files wait` before you read or change files; it returns once the code lands. Never recreate missing files.";
 
 /** A Cloud parent's code (its branch plus uncommitted changes) for a child in a sandbox of its own (ADR 0229),
@@ -135,7 +251,11 @@ export const CHILD_HINT = "[Cloud child]\nYou run in your own sandbox. Cloudroom
 export async function threadCode(deps: Parameters<typeof cloudroom>[0], threadId: string, id: string): Promise<Code | Error | null> {
   try {
     const source = binding(deps.db, threadId);
-    if (!source?.sessionId) return null;
+    if (!source?.sessionId) {
+      const environmentId = getThread(deps.db, threadId)?.environmentId;
+      const environment = environmentId ? getEnvironment(deps.db, environmentId) : null;
+      return environment?.path && environment.hostId === resolvePrimaryHostId(deps as AppDeps) ? await localCode(environment.path, id) : null;
+    }
     const from = await cloudroom(deps).threadClient(threadId);
     return await sourceCode(from, (await from.sessionWorkspace(source.sessionId)).path, id);
   } catch (error) { return error instanceof Error ? error : new Error(String(error)); }
@@ -154,12 +274,29 @@ async function idle(client: CloudroomClient, sessionId: string): Promise<void> {
 
 /** The source's branch plus its uncommitted changes as one extra commit, packed as a Git bundle. A folder with no Git
  *  history (a project not on GitHub) goes as its files instead, without dependencies or build output. The source is untouched. */
-async function sourceCode(from: CloudroomClient, workspace: string, id: string): Promise<Code | null> {
+export async function sourceCode(from: CloudroomClient, workspace: string, id: string): Promise<Code | null> {
+  return packCode({
+    run: async (script) => (await vm(from, script)).toString(),
+    read: (path) => download(from, path, 500),
+    remove: (path) => vm(from, `rm -f ${quote(path)}`),
+  }, workspace, id);
+}
+
+async function localCode(workspace: string, id: string): Promise<Code | null> {
+  if (await exec("git", ["-C", workspace, "rev-parse", "-q", "--verify", "HEAD"]).then(() => false, () => true)) return null;
+  return packCode({
+    run: async (script) => (await exec("sh", ["-c", script], { maxBuffer: 1024 * 1024 })).stdout,
+    read: async (path) => (await exec("cat", [path], { encoding: "buffer", maxBuffer: 1024 * 1024 * 1024 })).stdout,
+    remove: (path) => exec("rm", ["-f", path]),
+  }, workspace, id);
+}
+
+async function packCode(at: { run: (script: string) => Promise<string>; read: (path: string) => Promise<Buffer>; remove: (path: string) => Promise<unknown> }, workspace: string, id: string): Promise<Code | null> {
   const pack = async (thin: boolean): Promise<Code | null> => {
-    const [path, origin = ""] = (await vm(from, codeScript(workspace, id, thin))).toString().trim().split("\n");
+    const [path, origin = ""] = (await at.run(codeScript(workspace, id, thin))).trim().split("\n");
     if (!path) return null;
-    try { return { data: await download(from, path, 500), origin: origin.trim() }; }
-    finally { await vm(from, `rm -f ${quote(path)}`).catch(() => {}); }
+    try { return { data: await at.read(path), origin: origin.trim() }; }
+    finally { await at.remove(path).catch(() => {}); }
   };
   const code = await pack(true);
   if (!code || isFiles(code.data)) return code;

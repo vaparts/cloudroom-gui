@@ -177,8 +177,10 @@ async function startThreadIfEnvironmentReady(
   });
 
   if (
-    args.context.request.seedWithoutRun &&
-    args.context.request.fork === null
+    args.context.request.fork === null &&
+    (args.context.request.seedWithoutRun ||
+      (args.thread.originKind === "fork" &&
+        args.context.request.input.length === 0))
   ) {
     const outcome = applyLoggedThreadLifecycleEvent(deps, {
       threadId: args.thread.id,

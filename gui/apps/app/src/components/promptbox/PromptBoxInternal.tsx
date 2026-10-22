@@ -535,6 +535,7 @@ interface PromptBoxInternalProps {
   onEscape?: () => void;
   blurOnPointerSubmit?: boolean;
   placeholder?: string;
+  placeholderHint?: string;
   autoFocus?: boolean;
   allowSoftKeyboardAutoFocus?: boolean;
   textEffects?: readonly ComposerTextEffectSource[];
@@ -1257,6 +1258,7 @@ export function PromptBoxInternal({
   onEscape,
   blurOnPointerSubmit = false,
   placeholder = "Ask anything. @ to mention files, folders, or sections",
+  placeholderHint,
   autoFocus = true,
   allowSoftKeyboardAutoFocus = false,
   textEffects,
@@ -3451,6 +3453,8 @@ export function PromptBoxInternal({
               scrollContainerRef={editorScrollContainerRef}
               inputLocked={composerInputLocked}
               isCompactLayout={showCompactLayout}
+              placeholder={effectivePlaceholder}
+              placeholderHint={showCompactLayout ? undefined : placeholderHint}
               minHeight={minHeight}
               layout={editorLayout}
               resolveMentionLink={mentionResolveLink}

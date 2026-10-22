@@ -2,6 +2,58 @@
 
 Also on [cloudroom.dev/changelog](https://www.cloudroom.dev/changelog).
 
+## 115
+
+Organizations in the app (2026-10-21)
+
+### Changes
+
+- A new Organization page in the app, with Settings and Threads tabs.
+- For team members, the Organization plugin turns on by itself.
+- Team and repo rules reach every thread in your team's repos, never your personal work.
+- Organization settings apply as soon as you save them.
+- Signing out of a Mac now also ends its access to your other Macs.
+- Security fixes.
+- Cloud threads run on the latest Core.
+
+## 114
+
+Security fixes and a leaner app (2026-10-21)
+
+### Changes
+
+- Security fixes.
+- The app now runs on Electron 44.9.3.
+- Cloud threads run on the latest Core.
+- Fewer third-party libraries, replaced with small built-in code.
+
+## 113
+
+Git diff panel for Cloud threads (2026-10-20)
+
+### Changes
+
+- Cloud threads now have a Git info panel and Diff tab, just like Local threads.
+- When your Mac is unavailable, Cloud agents now see why.
+- Cloud usage shows agent hours everywhere, so the app and pricing page match.
+- Running background tasks use a calm static look, so long tasks no longer burn CPU.
+- The side chat button sits under the panel toggle, and typing goes straight into the side chat.
+- New custom icons for projects, computers, and branches.
+
+## 112
+
+Fork between Local and Cloud (2026-10-20)
+
+### Changes
+
+- Fork any thread to Local or Cloud, and switch its agent or model as you fork.
+- Side chats open instantly with one click and start fresh.
+- Cloud threads pick up again on their own when a Claude or Codex usage limit resets, or when you switch accounts.
+- The Mac helper tells you why Mac access or previews can't connect, like a VPN, proxy, or firewall.
+- Previews work behind more firewalls and proxies.
+- An open browser no longer keeps a Cloud sandbox awake or uses up your cloud hours.
+- New worktrees for big projects start faster.
+
 ## 111
 
 Longer Cloud messages, calmer errors (2026-10-19)

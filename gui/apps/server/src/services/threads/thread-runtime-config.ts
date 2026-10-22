@@ -42,7 +42,7 @@ import { resolveDeprecatedWorkspaceProvisionType } from "../environments/environ
 import {
   cloudroomSystemPrompt,
   CUSTOM_INSTRUCTIONS_PLUGIN_ID,
-  PLUGIN_INSTRUCTION_MAX_CHARS,
+  pluginInstructionMaxChars,
 } from "./custom-instructions.js";
 
 // Claude Code's native question tool and the ask-user-question plugin tool
@@ -266,8 +266,8 @@ export async function resolveThreadRuntimeCommandConfig(
       continue;
     }
     if (text === null || text.trim().length === 0) continue;
-    if (text.length > PLUGIN_INSTRUCTION_MAX_CHARS) {
-      text = text.slice(0, PLUGIN_INSTRUCTION_MAX_CHARS);
+    if (text.length > pluginInstructionMaxChars(contribution.pluginId)) {
+      text = text.slice(0, pluginInstructionMaxChars(contribution.pluginId));
     }
     instructionSections.push(
       `The following instructions come from the Cloudroom plugin "${contribution.pluginId}":`,

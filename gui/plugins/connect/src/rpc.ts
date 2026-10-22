@@ -138,6 +138,8 @@ export function createRpcHandlers(args: {
       return tunnel.listShares();
     },
     async relayCredential() {
+      // Check first, so a sign-out since the last minute's check has already retired the key.
+      await phone.check();
       return relay.getCredential();
     },
     async remoteInstructions(args) {
@@ -148,7 +150,8 @@ export function createRpcHandlers(args: {
       return { ok: true };
     },
     async macs() {
-      return { macs: await listMacs() };
+      await phone.check();
+      return { macs: phone.signedIn ? await listMacs() : [] };
     },
     async runSetupJob(args) {
       return setupJobs.start(args.command, args.stdin);

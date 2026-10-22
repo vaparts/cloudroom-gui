@@ -249,6 +249,17 @@
     content: attr(data-placeholder);
   }
 
+  [data-promptbox-placeholder-hint] {
+    display: none;
+  }
+
+  [data-promptbox-editor-scroll]:has(
+      .ProseMirror > p.is-editor-empty:first-child
+    )
+    > [data-promptbox-placeholder-hint] {
+    display: block;
+  }
+
   /*
    * Light up the `ultracode` keyword in the prompt editor with animated purple
    * sparkles (mirrors Claude Code). The wrapping span is added as a ProseMirror
@@ -619,6 +630,13 @@
     .ProseMirror
     p.is-editor-empty:first-child::before {
     content: var(--promptbox-container-compact-placeholder);
+  }
+
+  [data-follow-up-composer]:not([data-follow-up-composer-expanded])
+    [data-promptbox]:not([data-promptbox-voice-active])
+    [data-promptbox-editor-scroll]
+    > [data-promptbox-placeholder-hint] {
+    display: none;
   }
 }
 

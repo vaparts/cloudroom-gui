@@ -10,6 +10,7 @@ interface TimelineWorkingIndicatorProps {
   isThinking?: boolean;
   details?: string;
   reasoningId?: string;
+  shimmer?: boolean;
 }
 
 export function TimelineWorkingIndicator({
@@ -17,6 +18,7 @@ export function TimelineWorkingIndicator({
   isThinking = false,
   details,
   reasoningId,
+  shimmer = true,
 }: TimelineWorkingIndicatorProps) {
   const resolvedLabel = label ?? (isThinking ? "Thinking…" : "Working...");
   const hasDetails = (details?.trim().length ?? 0) > 0;
@@ -30,7 +32,7 @@ export function TimelineWorkingIndicator({
           headerClassName={INDICATOR_HEADER_CLASS_NAME}
           title={{
             segments: [
-              { text: resolvedLabel, em: false, shimmer: true, truncate: true },
+              { text: resolvedLabel, em: false, shimmer, truncate: true },
             ],
             decorations: [],
             tone: "default",
@@ -45,7 +47,9 @@ export function TimelineWorkingIndicator({
 
   return (
     <TimelineStatusIndicator
-      label={<span className="animate-shine">{resolvedLabel}</span>}
+      label={
+        <span className={cn(shimmer && "animate-shine")}>{resolvedLabel}</span>
+      }
       className={cn("mt-4 flex", INDICATOR_HEADER_CLASS_NAME)}
     />
   );

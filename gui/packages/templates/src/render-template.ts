@@ -1,4 +1,3 @@
-import Handlebars from "handlebars";
 import {
   templateDefinitions,
   type TemplateId,
@@ -9,33 +8,24 @@ const templateBodyById = Object.fromEntries(
   templateDefinitions.map((definition) => [definition.id, definition.body]),
 ) as Record<TemplateId, string>;
 
-const compiledTemplateCache = new Map<
-  TemplateId,
-  HandlebarsTemplateDelegate<TemplateVariables[TemplateId]>
->();
-
-function getCompiledTemplate<TTemplateId extends TemplateId>(
-  templateId: TTemplateId,
-) {
-  const cached = compiledTemplateCache.get(templateId);
-  if (cached) {
-    return cached as HandlebarsTemplateDelegate<TemplateVariables[TTemplateId]>;
-  }
-
-  const compiled = Handlebars.compile<TemplateVariables[TTemplateId]>(
-    templateBodyById[templateId],
-    { noEscape: true },
-  );
-  compiledTemplateCache.set(
-    templateId,
-    compiled as HandlebarsTemplateDelegate<TemplateVariables[TemplateId]>,
-  );
-  return compiled;
-}
+const IF_BLOCK =
+  /^[ \t]*\{\{#if (\w+)\}\}[ \t]*\r?\n([\s\S]*?)^[ \t]*\{\{\/if\}\}[ \t]*(?:\r?\n|$)/gmu;
+const VARIABLE = /\{\{(\w+)\}\}/gu;
+const UNSUPPORTED = /\\\{\{|\{\{(?!\w+\}\})|\{\{else\}\}/u;
 
 export function renderTemplate<TTemplateId extends TemplateId>(
   templateId: TTemplateId,
   variables: TemplateVariables[TTemplateId],
 ): string {
-  return getCompiledTemplate(templateId)(variables).trim();
+  const body = templateBodyById[templateId];
+  if (UNSUPPORTED.test(body.replace(IF_BLOCK, "$2"))) {
+    throw new Error(`Template "${templateId}" uses unsupported syntax`);
+  }
+  const values: Record<string, string | undefined> = variables;
+  return body
+    .replace(IF_BLOCK, (_, name: string, block: string) =>
+      values[name] ? block : "",
+    )
+    .replace(VARIABLE, (_, name: string) => values[name] ?? "")
+    .trim();
 }

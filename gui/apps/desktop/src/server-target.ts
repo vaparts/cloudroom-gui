@@ -32,6 +32,8 @@ interface CreateServerTargetStoreArgs {
 }
 
 export interface ServerTargetStore {
+  /** Forgets the remembered other Mac. True when this window was showing it. */
+  forgetConnectServer(): Promise<boolean>;
   getConnectServer(): ConnectServerRef | null;
   getCustomServerUrl(): string | null;
   getTarget(): DesktopServerTarget;
@@ -117,6 +119,14 @@ export function createServerTargetStore(
   }
 
   return {
+    async forgetConnectServer() {
+      if (connectServer === null) return false;
+      const shown = target === "connect";
+      connectServer = null;
+      if (shown) target = "builtin";
+      await persist();
+      return shown;
+    },
     getConnectServer() {
       return connectServer === null ? null : { ...connectServer };
     },

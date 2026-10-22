@@ -122,6 +122,7 @@ export function ThreadTimelinePanelContent({
       resolveMentionLink={resolveMentionLink}
       showOngoingIndicator={showOngoingIndicator}
       ongoingIndicatorLabel={ongoingIndicatorLabel}
+      ongoingIndicatorShimmer={backgroundOnlyIndicatorLabel === undefined}
       timelineErrorClassName="mx-2 mt-4 text-destructive"
       timelineRows={timelineRows}
       threadId={threadId}

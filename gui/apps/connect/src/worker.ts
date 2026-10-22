@@ -29,6 +29,7 @@ import {
   phoneUser,
   pickServer,
   registerServer,
+  retireServer,
   revokeSessions,
   serverByCredential,
   serverByHandle,
@@ -311,6 +312,10 @@ async function apex(request: Request, url: URL, env: Env): Promise<Response> {
     if (url.pathname === "/api/computers/open") return openComputer(request, env, server);
     if (url.pathname === "/api/machines") return addMachine(request, env, server);
     if (url.pathname === "/api/machines/revoke") return removeMachine(request, env, server);
+    if (url.pathname === "/api/unregister") {
+      await retireServer(env.DB, server.id);
+      return json({ ok: true });
+    }
     if (url.pathname === "/api/phone-code") {
       const { code, expiresAt } = await createCode(env.DB, server.id, null, PHONE_CODE_TTL_MS);
       const formatted = formatCode(code);

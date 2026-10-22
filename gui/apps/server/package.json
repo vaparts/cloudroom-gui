@@ -20,6 +20,7 @@
     "@cloudroom/db": "workspace:*",
     "@cloudroom/domain": "workspace:*",
     "@cloudroom/host-daemon-contract": "workspace:*",
+    "@cloudroom/host-workspace": "workspace:*",
     "@cloudroom/logger": "workspace:*",
     "@cloudroom/plugin-build": "workspace:*",
     "@cloudroom/process-utils": "workspace:*",

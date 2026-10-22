@@ -1,12 +1,11 @@
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import babel from "@rolldown/plugin-babel";
 import { reactCompilerPreset } from "@vitejs/plugin-react";
-import * as cacache from "cacache";
 import type { ResolvedConfig } from "vite";
 import { z } from "zod";
 
@@ -31,6 +30,26 @@ const transformResult = z
 
 function digest(value: string) {
   return createHash("sha256").update(value).digest("hex");
+}
+
+async function readCacheEntry(directory: string, key: string) {
+  const text = await readFile(resolve(directory, key), "utf8");
+  const split = text.indexOf("\n");
+  const data = text.slice(split + 1);
+  if (split === -1 || text.slice(0, split) !== digest(data))
+    throw new Error("Corrupt React Compiler cache entry");
+  return data;
+}
+
+async function writeCacheEntry(directory: string, key: string, data: string) {
+  await mkdir(directory, { recursive: true });
+  const temporary = resolve(directory, `${key}.${randomUUID()}.tmp`);
+  try {
+    await writeFile(temporary, `${digest(data)}\n${data}`);
+    await rename(temporary, resolve(directory, key));
+  } finally {
+    await rm(temporary, { force: true });
+  }
 }
 
 export function containsWorktreePath(serialized: string, root: string) {
@@ -166,30 +185,12 @@ export async function cachedReactCompiler(cacheDirectory?: string): Promise<
       );
     if (!cache || !key) return handler.call(this, code, id, options);
     try {
-      const entry = await cacache.get(cache.directory, key);
       const result = transformResult.parse(
-        JSON.parse(entry.data.toString("utf8")),
+        JSON.parse(await readCacheEntry(cache.directory, key)),
       );
       stats.hits++;
       return result;
-    } catch (error) {
-      if (
-        error instanceof Error &&
-        "code" in error &&
-        (error.code === "EINTEGRITY" || error.code === "EBADSIZE")
-      ) {
-        try {
-          const entry = await cacache.get.info(cache.directory, key);
-          if (entry) await cacache.rm.content(cache.directory, entry.integrity);
-        } catch (error) {
-          if (!warned) {
-            this.warn(
-              `Unable to remove corrupt React Compiler cache entry: ${String(error)}`,
-            );
-            warned = true;
-          }
-        }
-      }
+    } catch {
       stats.misses++;
       const result = await handler.call(this, code, id, options);
       const parsed = transformResult.safeParse(result);
@@ -197,7 +198,7 @@ export async function cachedReactCompiler(cacheDirectory?: string): Promise<
         const serialized = JSON.stringify(parsed.data);
         if (!containsWorktreePath(serialized, root)) {
           try {
-            await cacache.put(cache.directory, key, serialized);
+            await writeCacheEntry(cache.directory, key, serialized);
           } catch (error) {
             if (!warned) {
               this.warn(

@@ -203,7 +203,7 @@ const TEMPORARY_UNTRACKED_INDEX_ADD_ATTEMPTS = 3;
 const DIFF_NUMSTAT_BASE_BUFFER_BYTES = 64 * 1024;
 const DIFF_NUMSTAT_PER_FILE_BUFFER_BYTES = 16 * 1024;
 
-function resolveWorkspaceFileStatusKind(args: {
+export function resolveWorkspaceFileStatusKind(args: {
   indexStatus: string;
   status: string;
   worktreeStatus: string;
@@ -265,7 +265,7 @@ function mapNameStatusLetter(letter: string): WorkspaceFileStatusKind {
   }
 }
 
-function resolveWorkspaceState(args: {
+export function resolveWorkspaceState(args: {
   hasCommittedChanges: boolean;
   hasTrackedChanges: boolean;
   hasUntracked: boolean;
@@ -312,7 +312,7 @@ function isMissingHeadRevisionError(stderr: string): boolean {
   );
 }
 
-function formatShortstat(args: {
+export function formatShortstat(args: {
   changedFiles: number;
   deletions: number;
   insertions: number;

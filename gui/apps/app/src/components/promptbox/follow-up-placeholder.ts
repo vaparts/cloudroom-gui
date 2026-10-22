@@ -1,6 +1,8 @@
 import type { ThreadRuntimeDisplayStatus } from "@cloudroom/domain";
 import { assertNever } from "@cloudroom/core-ui";
 
+export const PROMPT_PLACEHOLDER_HINT = "@ to tag an Agent";
+
 export function getFollowUpPromptPlaceholder(
   displayStatus: ThreadRuntimeDisplayStatus,
 ): string {
@@ -20,7 +22,7 @@ export function getFollowUpPromptPlaceholder(
     case "pending":
     case "idle":
     case "active":
-      return "Ask for a follow-up. @ to mention files, folders, sections, or threads";
+      return "Ask Cloudroom";
     default:
       return assertNever(displayStatus);
   }
@@ -45,8 +47,18 @@ export function getCompactFollowUpPromptPlaceholder(
     case "pending":
     case "idle":
     case "active":
-      return "Ask a follow-up";
+      return "Ask Cloudroom";
     default:
       return assertNever(displayStatus);
   }
+}
+
+export function getFollowUpPromptPlaceholderHint(
+  displayStatus: ThreadRuntimeDisplayStatus,
+): string | undefined {
+  return displayStatus === "pending" ||
+    displayStatus === "idle" ||
+    displayStatus === "active"
+    ? PROMPT_PLACEHOLDER_HINT
+    : undefined;
 }

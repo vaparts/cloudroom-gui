@@ -34,6 +34,7 @@ import {
 } from "./services/system/provider-auto-update.js";
 import { createProviderRegistryService } from "./services/providers/provider-registry.js";
 import { installFirstResponseTelemetry } from "./services/system/first-response-telemetry.js";
+import { startOrgPlugin } from "./services/cloudroom/org-plugin.js";
 import { startSetupTelemetry } from "./services/cloudroom/setup-telemetry.js";
 import { installTitleRecheck } from "./services/threads/title-recheck.js";
 import { installThreadPurpose } from "./services/threads/thread-purpose.js";
@@ -299,6 +300,7 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
     .finally(() => {
       providerRegistry.markRegistrationsSettled();
       pluginService.startPeriodicUpdateChecks();
+      startOrgPlugin({ sandboxes: cloud.sandboxes, plugins: pluginService, logger });
     });
   pluginCatalogService.startPeriodicRefresh();
 

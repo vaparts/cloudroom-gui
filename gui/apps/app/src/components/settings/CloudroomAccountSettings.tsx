@@ -38,6 +38,16 @@ export function CloudroomAccountSettings() {
     },
     onSuccess: refresh,
   });
+  const check = useMutation({
+    mutationFn: async () => {
+      await sdk.cloudroom.checkPreviews();
+      for (let second = 0; second < 12; second++) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        if ((await sdk.cloudroom.status()).previews?.state === "connected") return await refresh();
+      }
+    },
+    onSettled: refresh,
+  });
   const account = status.data?.account;
   const ready = status.data?.ready;
   useEffect(() => { void queryClient.invalidateQueries({ queryKey: ["cloudroom-connection"] }); }, [queryClient, account?.id, ready]);
@@ -45,6 +55,8 @@ export function CloudroomAccountSettings() {
   const sync = status.data?.sync;
   const syncBroken = ready && sync && (sync.issue || sync.state === "offline" || sync.state === "conflict");
   const previews = status.data?.previews;
+  const resetCheck = check.reset;
+  useEffect(() => { if (previews?.state === "connected") resetCheck(); }, [previews?.state, resetCheck]);
   const signedIn = account && !status.data?.signingIn;
   return <>
     {signedIn ? <section className="flex flex-col items-center gap-3 text-center">
@@ -61,6 +73,13 @@ export function CloudroomAccountSettings() {
       <div className="w-full space-y-3 text-left empty:hidden">
         {!ready && <FixPrompt prompt={cloudUnavailableFixPrompt(status.data?.error)} />}
         {sync && (sync.issue || sync.conflicts) ? <p role="status" className="text-sm">{sync.issue ?? `${sync.conflicts} conflicting files need review.`}</p> : null}
+        {previews?.explained && previews.state !== "connected" && previews.message ? <div role="status" className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-center text-sm">
+          <p className="flex items-center justify-center gap-1.5 font-medium text-foreground"><Icon name="AlertTriangle" className="size-4 shrink-0 text-warning-text" aria-hidden />Mac access and previews can't connect</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {previews.message}{" "}
+            {check.isPending ? "Checking…" : <>{check.isSuccess && "Still can't connect. "}<Button variant="link" className="h-auto p-0 align-baseline text-xs font-normal text-muted-foreground underline underline-offset-2 hover:text-foreground" onClick={() => check.mutate()}>Check now</Button></>}
+          </p>
+        </div> : null}
         {sync && syncBroken && <FixPrompt prompt={syncFixPrompt(sync.state, sync.issue)} />}
         {error && <p role="alert" className="text-sm">{error}</p>}
       </div>

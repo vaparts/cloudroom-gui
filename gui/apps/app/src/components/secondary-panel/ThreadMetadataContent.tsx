@@ -26,7 +26,10 @@ import {
 } from "@cloudroom/core-ui";
 import { cn } from "@cloudroom/shared-ui/lib/utils";
 import { copyToClipboardWithToast } from "@/lib/clipboard";
-import { cloudroomEnvironmentPresentation } from "@/lib/cloudroom-environment-label";
+import {
+  CLOUDROOM_CLOUD_PRIMARY,
+  cloudroomEnvironmentPresentation,
+} from "@/lib/cloudroom-environment-label";
 import {
   findEnvironmentDisplayProvider,
   getEnvironmentWorkspaceInfoDisplay,
@@ -395,6 +398,34 @@ export function WorkspacePathRow({ environment }: WorkspacePathRowProps) {
         errorMessage="Failed to copy directory"
       />
     </DetailRow>
+  );
+}
+
+export function CloudWorkspaceRows({ path }: { path: string | null | undefined }) {
+  if (path === undefined) return null;
+  return (
+    <>
+      <DetailRow
+        label={<DetailRowIconLabel icon="Cloud">Environment</DetailRowIconLabel>}
+        valueClassName="min-w-0 truncate"
+      >
+        {CLOUDROOM_CLOUD_PRIMARY}
+      </DetailRow>
+      {path ? (
+        <DetailRow
+          label={<DetailRowIconLabel icon="Folder">Directory</DetailRowIconLabel>}
+          valueClassName="min-w-0"
+        >
+          <CopyableInlineLabel
+            text={path}
+            label="Copy directory"
+            title={path}
+            successMessage="Directory copied"
+            errorMessage="Failed to copy directory"
+          />
+        </DetailRow>
+      ) : null}
+    </>
   );
 }
 
@@ -892,6 +923,7 @@ export interface ThreadMetadataContentProps {
   environment: Environment | null;
   environmentProvisioningFailure: boolean;
   environmentDisplayHost: EnvironmentDisplayHostContext;
+  cloudWorkspacePath?: string | null;
   workspaceStatus: WorkspaceStatus | undefined;
   workspaceStatusError: Error | null;
   workspaceUnavailable?: WorkspaceResolutionFailure;
@@ -918,6 +950,7 @@ export function hasAnyThreadMetadata(
     thread,
     environment,
     environmentProvisioningFailure,
+    cloudWorkspacePath,
     workspaceStatus,
     workspaceStatusError,
     workspaceUnavailable,
@@ -927,6 +960,7 @@ export function hasAnyThreadMetadata(
     | "thread"
     | "environment"
     | "environmentProvisioningFailure"
+    | "cloudWorkspacePath"
     | "workspaceStatus"
     | "workspaceStatusError"
     | "workspaceUnavailable"
@@ -951,6 +985,7 @@ export function hasAnyThreadMetadata(
     parentThreadId ||
     environment ||
     environmentProvisioningFailure ||
+    cloudWorkspacePath !== undefined ||
     branchName ||
     pullRequest ||
     showWorkspaceStatus ||
@@ -1017,6 +1052,7 @@ export function ThreadMetadataContent(props: ThreadMetadataContentProps) {
     environment,
     environmentProvisioningFailure,
     environmentDisplayHost,
+    cloudWorkspacePath,
     workspaceStatus,
     workspaceStatusError,
     workspaceUnavailable,
@@ -1065,6 +1101,7 @@ export function ThreadMetadataContent(props: ThreadMetadataContentProps) {
         failed={environmentProvisioningFailure}
       />
       <WorkspacePathRow environment={environment} />
+      <CloudWorkspaceRows path={cloudWorkspacePath} />
       <BranchRow workspaceStatus={workspaceStatus} />
       <MergeBaseRow
         workspaceStatus={workspaceStatus}

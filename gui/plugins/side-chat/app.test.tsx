@@ -46,13 +46,11 @@ describe("parsePanelParams", () => {
         threadId: "thr_fork",
         sourceThreadId: "thr_src",
         sourceMessageText: "anchor",
-        sourceSeqEnd: 5,
       }),
     ).toEqual({
       threadId: "thr_fork",
       sourceThreadId: "thr_src",
       sourceMessageText: "anchor",
-      sourceSeqEnd: 5,
     });
     expect(
       parsePanelParams({ threadId: "thr_fork", sourceThreadId: "thr_src" }),
@@ -60,7 +58,6 @@ describe("parsePanelParams", () => {
       threadId: "thr_fork",
       sourceThreadId: "thr_src",
       sourceMessageText: "",
-      sourceSeqEnd: null,
     });
     expect(parsePanelParams(null)).toBeNull();
     expect(parsePanelParams({ threadId: "thr_fork" })).toBeNull();
@@ -98,7 +95,6 @@ describe("reply-in-side-chat message action", () => {
     );
     expect(body).toEqual({
       sourceThreadId: "thr_src",
-      sourceSeqEnd: 42,
       anchorText: "whole message text",
     });
     expect(openPanel).toHaveBeenCalledWith({
@@ -108,7 +104,6 @@ describe("reply-in-side-chat message action", () => {
         threadId: "thr_fork",
         sourceThreadId: "thr_src",
         sourceMessageText: "whole message text",
-        sourceSeqEnd: 42,
       },
     });
   });
@@ -191,7 +186,6 @@ describe("SideChatPanel", () => {
     threadId: "thr_fork",
     sourceThreadId: "thr_src",
     sourceMessageText: "the **anchor** message",
-    sourceSeqEnd: 7,
   };
 
   it("renders ThreadChat with the ReplyingTo header and send-to-main action", () => {

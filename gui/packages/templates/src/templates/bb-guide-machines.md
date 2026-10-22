@@ -11,7 +11,8 @@ Cloudroom account
 Settings → Machines → Cloudroom account connects the existing VM directly to the
 Rust core. Do not add that VM as a native machine or configure a remote cloudroom server.
 `room-cli cloud sign-in --project ID` prints its browser confirmation link;
-`room-cli cloud status --json` reports account identity and readiness.
+`room-cli cloud status --json` reports account identity, readiness, and why Mac
+access and previews can't connect. `room-cli cloud check` makes them retry now.
 `room-cli cloud cancel` cancels pending login. `room-cli cloud logout` removes local
 VM credentials without stopping remote agents or erasing local history.
 The SDK equivalents are `sdk.cloudroom.signIn`, `.status`, `.cancel`, and `.logout`.

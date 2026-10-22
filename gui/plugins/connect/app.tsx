@@ -6,7 +6,6 @@ import {
   useRpc,
 } from "@get-bb/plugin-sdk/app";
 import type { connectRpcContract } from "./src/rpc.js";
-import QRCode from "qrcode";
 import { Button } from "@cloudroom/shared-ui/button";
 import { Icon } from "@cloudroom/shared-ui/icon";
 import { Input } from "@cloudroom/shared-ui/input";
@@ -14,7 +13,7 @@ import { Switch } from "@cloudroom/shared-ui/switch";
 import { cn } from "@cloudroom/shared-ui/lib/utils";
 import {
   CONNECT_REALTIME_CHANNEL,
-  PHONE_SETUP_URL,
+  PHONE_SETUP_URL_QR,
   type ConnectStateName,
   type ConnectStatus,
 } from "@/src/types";
@@ -134,42 +133,18 @@ function StatusDot({ tone }: { tone: "ok" | "warn" | "muted" }) {
   );
 }
 
-function QrCodeImage({
-  value,
-  alt,
-  className,
-}: {
-  value: string;
-  alt: string;
-  className?: string;
-}) {
-  const [dataUrl, setDataUrl] = useState<string | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    QRCode.toDataURL(value, { margin: 1, width: 320 }).then(
-      (url) => {
-        if (!cancelled) setDataUrl(url);
-      },
-      () => {
-        if (!cancelled) setDataUrl(null);
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [value]);
-  if (dataUrl === null) return null;
-  return (
-    <img
-      src={dataUrl}
-      alt={alt}
-      className={cn(
-        "size-32 rounded-md border border-border bg-white p-1.5",
-        className,
-      )}
-    />
+function qrCodeSvgUrl(rows: readonly string[]): string {
+  const size = rows.length + 2;
+  const modules = rows.flatMap((row, y) =>
+    [...row].map((cell, x) =>
+      cell === "#" ? `M${x + 1} ${y + 1}h1v1h-1z` : "",
+    ),
   );
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" shape-rendering="crispEdges"><rect width="${size}" height="${size}" fill="#fff"/><path d="${modules.join("")}"/></svg>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
+
+const PHONE_SETUP_QR_SRC = qrCodeSvgUrl(PHONE_SETUP_URL_QR);
 
 function UrlHero({ url, showOpen }: { url: string; showOpen: boolean }) {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "manual">(
@@ -511,10 +486,10 @@ function SharedPortsSection({
 function PhoneSetupCard() {
   return (
     <div className="flex items-center gap-8 rounded-lg border border-border p-6">
-      <QrCodeImage
-        value={PHONE_SETUP_URL}
+      <img
+        src={PHONE_SETUP_QR_SRC}
         alt="QR code to set up Cloudroom on your phone"
-        className="size-48 shrink-0 p-2"
+        className="size-48 shrink-0 rounded-md border border-border bg-white p-2"
       />
       <div className="min-w-0 flex-1 space-y-1">
         <h3 className="text-base font-semibold text-foreground">Scan with your phone</h3>

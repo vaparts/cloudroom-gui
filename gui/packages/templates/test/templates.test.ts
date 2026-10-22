@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   renderTemplate,
   type TemplateId,
@@ -51,7 +51,9 @@ describe("@cloudroom/templates", () => {
   });
 
   it("renders standardAgentAppendInstructions without user-question guidance", () => {
-    const rendered = renderTemplate("standardAgentAppendInstructions", { bugReports: "" });
+    const rendered = renderTemplate("standardAgentAppendInstructions", {
+      bugReports: "",
+    });
 
     expect(rendered).toContain("You are working inside Cloudroom");
     expect(rendered).toContain("IDE for managing coding agents");
@@ -109,6 +111,53 @@ describe("@cloudroom/templates", () => {
     );
   });
 
+  it("renders if blocks only when their variable is set", () => {
+    const variables = {
+      title: "Fix login",
+      firstMessage: "Login fails",
+      recentMessages: "- Login fails",
+    };
+    const bare = renderTemplate("generateThreadPurpose", variables);
+    const full = renderTemplate("generateThreadPurpose", {
+      ...variables,
+      previousPurpose: "Fixing login (50% done)",
+      agentReply: "Use $& and {{title}}.",
+    });
+
+    expect(bare.slice(bare.indexOf("Update it when"))).toBe(
+      [
+        "Update it when the user changed direction.",
+        "",
+        "Thread name: Fix login",
+        "",
+        "The user's first message:",
+        "Login fails",
+        "",
+        "The user's latest messages:",
+        "- Login fails",
+      ].join("\n"),
+    );
+    expect(full.slice(full.indexOf("Update it when"))).toBe(
+      [
+        "Update it when the user changed direction.",
+        "",
+        "Previous note (reuse its wording if the goal and state did not change):",
+        "Fixing login (50% done)",
+        "",
+        "Thread name: Fix login",
+        "",
+        "The user's first message:",
+        "Login fails",
+        "",
+        "The user's latest messages:",
+        "- Login fails",
+        "",
+        "The agent's latest reply:",
+        "Use $& and {{title}}.",
+      ].join("\n"),
+    );
+  });
+
   it("renders all templates without error", () => {
     const templates = templateDefinitions;
 
@@ -129,5 +178,25 @@ describe("@cloudroom/templates", () => {
         renderTemplate(template.id as TemplateId, vars),
       ).not.toThrow();
     }
+  });
+
+  it("throws on unsupported syntax instead of dropping it", async () => {
+    const bodies = [
+      "\\{{title}}",
+      "{{#each items}}x{{/each}}",
+      "{{#if title}}\nx\n{{else}}\ny\n{{/if}}",
+    ];
+    for (const body of bodies) {
+      vi.resetModules();
+      vi.doMock("../src/generated/templates.generated.js", () => ({
+        templateDefinitions: [{ id: "probe", body }],
+      }));
+      const { renderTemplate: render } =
+        await import("../src/render-template.js");
+      expect(() => render("probe" as TemplateId, {} as never)).toThrow(
+        "unsupported syntax",
+      );
+    }
+    vi.doUnmock("../src/generated/templates.generated.js");
   });
 });

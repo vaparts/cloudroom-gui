@@ -53,8 +53,31 @@ async function readIncludeFile(sourcePath: string): Promise<string | null> {
   }
 }
 
+function rootedPathspecs(contents: string): string[] | null {
+  const pathspecs: string[] = [];
+  for (const line of contents.split(/\r?\n/u)) {
+    const pattern = line.trimEnd().replace(/\/+$/u, "");
+    if (pattern === "" || pattern.startsWith("#") || pattern.startsWith("!")) {
+      continue;
+    }
+    if (!pattern.includes("/")) {
+      return null;
+    }
+    const rooted = pattern.replace(/^\/+/u, "");
+    const wildcard = rooted.search(/[*?[\\]/u);
+    const end =
+      wildcard === -1 ? rooted.length : rooted.lastIndexOf("/", wildcard);
+    if (end <= 0) {
+      return null;
+    }
+    pathspecs.push(`:(literal)${rooted.slice(0, end)}`);
+  }
+  return pathspecs;
+}
+
 async function listMatchingFiles(
   sourcePath: string,
+  pathspecs: string[] | null,
   signal: AbortSignal | undefined,
 ): Promise<string[]> {
   const result = await runGit(
@@ -64,6 +87,7 @@ async function listMatchingFiles(
       "--ignored",
       `--exclude-from=${WORKTREE_INCLUDE_FILE_NAME}`,
       "-z",
+      ...(pathspecs === null ? [] : ["--", ...pathspecs]),
     ],
     {
       cwd: sourcePath,
@@ -105,7 +129,11 @@ export async function copyWorktreeIncludeFiles(
     return EMPTY_RESULT;
   }
 
-  const relativePaths = await listMatchingFiles(args.sourcePath, args.signal);
+  const relativePaths = await listMatchingFiles(
+    args.sourcePath,
+    rootedPathspecs(contents),
+    args.signal,
+  );
   if (relativePaths.length === 0) {
     return { ran: true, copied: [], skipped: [] };
   }

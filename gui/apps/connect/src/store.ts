@@ -223,11 +223,28 @@ export async function setServerName(db: D1Database, serverId: string, name: stri
   await db.prepare("UPDATE server SET name = ? WHERE id = ?").bind(name, serverId).run();
 }
 
+// A random hash nobody holds the key for: the server keeps its address and phones, but its old key stops working.
+const RETIRED_HASH = "lower(hex(randomblob(32)))";
+
+/** Retires keys (sign-out, or the Mac signed in to another account), so they can't list or open the account's Macs. */
+async function retire(db: D1Database, where: string, ...values: string[]): Promise<void> {
+  const { results } = await db
+    .prepare(`UPDATE server SET credential_hash = ${RETIRED_HASH} WHERE ${where} RETURNING handle`)
+    .bind(...values)
+    .all<{ handle: string }>();
+  for (const row of results) servers.delete(row.handle);
+}
+
+export function retireServer(db: D1Database, serverId: string): Promise<void> {
+  return retire(db, "id = ?", serverId);
+}
+
 export async function registerServer(
   db: D1Database,
   userId: string,
   installId: string,
 ): Promise<{ handle: string; credential: string }> {
+  await retire(db, "install_id = ? AND user_id <> ?", installId, userId);
   const credential = randomToken();
   const credentialHash = await sha256Hex(credential);
   const existing = await db

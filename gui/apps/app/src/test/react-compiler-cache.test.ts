@@ -1,8 +1,7 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
-import * as cacache from "cacache";
 import { build } from "vite";
 import { afterEach, expect, it, vi } from "vitest";
 import {
@@ -80,9 +79,10 @@ it("reuses exact compiler output and maps, invalidates inputs, and repairs corru
 
     vi.stubEnv("BABEL_ENV", "cache-invalidation-test");
     expect((await compile()).stats.misses).toBeGreaterThan(0);
-    const entries = await cacache.ls(directory);
+    const entries = await readdir(directory);
+    const corrupt = `${"0".repeat(64)}\n${JSON.stringify({ code: "corrupt", map: null })}`;
     await Promise.all(
-      Object.values(entries).map((entry) => writeFile(entry.path, "corrupt")),
+      entries.map((entry) => writeFile(resolve(directory, entry), corrupt)),
     );
     const repaired = await compile();
     expect(repaired.stats.misses).toBeGreaterThan(0);

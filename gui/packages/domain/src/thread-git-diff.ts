@@ -38,3 +38,15 @@ export const threadGitDiffResponseSchema = z.object({
   mergeBaseRef: z.string().nullable(),
 });
 export type ThreadGitDiffResponse = z.infer<typeof threadGitDiffResponseSchema>;
+
+const CLOUD_GIT_ENVIRONMENT_PREFIX = "cloudgit_";
+
+export function cloudGitEnvironmentId(threadId: string): string {
+  return `${CLOUD_GIT_ENVIRONMENT_PREFIX}${threadId}`;
+}
+
+export function cloudGitThreadId(environmentId: string): string | null {
+  return environmentId.startsWith(CLOUD_GIT_ENVIRONMENT_PREFIX)
+    ? environmentId.slice(CLOUD_GIT_ENVIRONMENT_PREFIX.length) || null
+    : null;
+}

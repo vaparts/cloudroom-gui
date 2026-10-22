@@ -96,6 +96,7 @@ import {
   isRelayUrl,
   listComputers,
   openComputer,
+  relayCookieOrigins,
   RELAY_CREDENTIAL_FILE_NAME,
   type ComputerList,
   type ComputersFailure,
@@ -1242,12 +1243,36 @@ function setComputerFallback(fallback: typeof computerFallback): void {
 }
 
 async function getRelayCredential(startLocal: boolean): Promise<ConnectCredential | null> {
-  if (relayCredential !== null) return relayCredential;
-  if (currentRuntime === null && startLocal) await ensureBuiltinRuntimeAttached();
-  if (currentRuntime === null) return null;
-  relayCredential = await fetchRelayCredential(currentRuntime.serverUrl);
-  if (relayCredential !== null) await relayCredentialCache?.write(relayCredential);
+  if (relayCredential === null && currentRuntime === null && startLocal) await ensureBuiltinRuntimeAttached();
+  // The Connect plugin owns the key. The saved copy only opens another Mac fast at launch; once the plugin answers, it wins.
+  if (currentRuntime !== null) {
+    const current = await fetchRelayCredential(currentRuntime.serverUrl);
+    if (current !== undefined) await setRelayCredential(current);
+  }
   return relayCredential;
+}
+
+/** Signed out (no key) or signed in to another account (a new address): also forget that account's other Macs. */
+async function setRelayCredential(next: ConnectCredential | null): Promise<void> {
+  const previous = relayCredential;
+  relayCredential = next;
+  if (next === null) await relayCredentialCache?.clear();
+  else if (next.credential !== previous?.credential) await relayCredentialCache?.write(next);
+  if (next === null || (previous !== null && previous.handle !== next.handle)) await forgetOtherMacs();
+}
+
+/** Drops the other Macs from the menus, signs this app out of them, deletes their saved data, and shows this Mac. */
+async function forgetOtherMacs(): Promise<void> {
+  const origins = new Set(await relayCookieOrigins(session.defaultSession.cookies));
+  for (const computer of computerList?.computers ?? []) origins.add(new URL(computer.url).origin);
+  const remembered = serverTargetStore?.getConnectServer();
+  if (remembered) origins.add(new URL(remembered.url).origin);
+  if (origins.size === 0 && computerList === null && !remembered) return;
+  computerList = null;
+  await Promise.all([...origins].map((origin) => session.defaultSession.clearStorageData({ origin }).catch(() => {})));
+  if (await serverTargetStore?.forgetConnectServer()) void applyServerTarget();
+  refreshApplicationMenu();
+  sendDesktopInfoChanged();
 }
 
 async function clearRelayCredential(): Promise<void> {
@@ -2133,6 +2158,9 @@ async function runDesktopApp(): Promise<void> {
     platform: process.platform,
   });
 
+  if (process.platform === "darwin") {
+    process.env.CURL_SSL_BACKEND ??= "secure-transport";
+  }
   if (app.isPackaged && process.platform === "darwin") {
     process.env.PATH = `${join(process.resourcesPath, "git", "bin")}:${process.env.PATH ?? "/usr/bin:/bin"}`;
   }

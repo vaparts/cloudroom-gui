@@ -9,7 +9,7 @@ const SHIM = `#!/bin/sh
 # Written by the Cloudroom host daemon (ADR 0190); edits are overwritten.
 set -e
 version=0.1.13
-uv_version=0.12.23
+uv_version=0.13.4
 home=$(cd "$(dirname "$0")/.." && pwd)/browser-harness
 venv="$home/$version"
 export BH_TELEMETRY=0 BH_UPDATE_CHECK=0
@@ -18,10 +18,10 @@ sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1"; else sh
 
 if [ ! -f "$venv/.ready" ]; then
   case "$(uname -s)-$(uname -m)" in
-    Darwin-arm64) target=aarch64-apple-darwin sum=50487ae565ccd96e499056b4674d438f4c53170202617b4c759defe0c6a1b544 ;;
-    Darwin-x86_64) target=x86_64-apple-darwin sum=960da44cb4b73685206ddd250b19e0a117fa41095710c1038f081f5cb613efb4 ;;
-    Linux-aarch64 | Linux-arm64) target=aarch64-unknown-linux-gnu sum=6524bd338177ed50d035d39354e12545e993bbeba2ecbddf0480c5b3a81d313f ;;
-    Linux-x86_64) target=x86_64-unknown-linux-gnu sum=9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6 ;;
+    Darwin-arm64) target=aarch64-apple-darwin sum=e0b1d4743ce64c55d9f0f4a444afa6b81125680070ee04e853fcd0f6c1ebf8f1 ;;
+    Darwin-x86_64) target=x86_64-apple-darwin sum=7be2dcd316122f4b3e5a0a7889f6248266c14425374e105ff7dc9779184603a6 ;;
+    Linux-aarch64 | Linux-arm64) target=aarch64-unknown-linux-gnu sum=1ae72b4718729e2ccc4f1ae2c6d1e531ca8467800e0546e9130b3886023a60ab ;;
+    Linux-x86_64) target=x86_64-unknown-linux-gnu sum=2b428396f12572d4429cf210ca234dd599a33b3af0958a4d5ed569d63e3f344f ;;
     *) echo "browser-harness: $(uname -sm) is not supported" >&2; exit 1 ;;
   esac
   mkdir -p "$home"

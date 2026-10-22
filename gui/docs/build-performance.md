@@ -4,9 +4,10 @@ The app production build retains `@rolldown/plugin-babel` with the unchanged
 `reactCompilerPreset()`. Its original filter, environment hook, parser options,
 compiler optimizations, diagnostics, generated code, and source maps remain
 authoritative. A wrapper stores only successful, validated `{ code, map }`
-transform results with npm's `cacache`, which provides content integrity checks
-and concurrent atomic storage. Missing, malformed, or corrupt entries run the
-original transform and are replaced. Results with unknown fields or absolute
+transform results, one file per transform key. Each file starts with a SHA-256
+integrity line and is written to a temporary file, then renamed, so concurrent
+builds never read partial entries. Missing, malformed, or corrupt entries run
+the original transform and are replaced. Results with unknown fields or absolute
 worktree paths, including JSON-escaped paths, are not stored.
 
 The intermediate cache lives at

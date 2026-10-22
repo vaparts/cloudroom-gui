@@ -83,10 +83,11 @@ export async function computerName(): Promise<string> {
   return hostname().replace(/\.local$/u, "");
 }
 
-/** This Mac's cloudroom.run key, from the Connect plugin on the local server. */
+/** This Mac's cloudroom.run key, from the Connect plugin on the local server: null when it has none (signed out),
+ *  undefined when the server didn't answer. */
 export async function fetchRelayCredential(
   localServerUrl: string,
-): Promise<ConnectCredential | null> {
+): Promise<ConnectCredential | null | undefined> {
   const response = await fetch(
     new URL("/api/v1/plugins/connect/rpc/relayCredential", localServerUrl),
     {
@@ -99,7 +100,17 @@ export async function fetchRelayCredential(
   const parsed = z
     .object({ ok: z.literal(true), result: connectCredentialSchema.nullable() })
     .safeParse(body);
-  return parsed.success ? parsed.data.result : null;
+  return parsed.success ? parsed.data.result : undefined;
+}
+
+/** Every cloudroom.run address this app has a cookie for: other Macs it opened and their port shares. */
+export async function relayCookieOrigins(cookies: {
+  get(filter: Record<string, never>): Promise<{ domain?: string }[]>;
+}): Promise<string[]> {
+  const origins = (await cookies.get({}).catch(() => [])).map(
+    ({ domain }) => `https://${(domain ?? "").replace(/^\./u, "")}`,
+  );
+  return [...new Set(origins.filter(isRelayUrl))];
 }
 
 async function callRelay(

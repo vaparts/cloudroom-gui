@@ -959,7 +959,7 @@ function workflowVerbForStatus(status: TimelineRowStatus): {
 } {
   switch (status) {
     case "pending":
-      return { text: "Running workflow:", shimmer: true };
+      return { text: "Running workflow:", shimmer: false };
     case "completed":
       return { text: "Ran workflow:", shimmer: false };
     case "error":
@@ -990,7 +990,7 @@ function backgroundCommandVerbForStatus(status: TimelineRowStatus): {
 } {
   switch (status) {
     case "pending":
-      return { text: "Running background command:", shimmer: true };
+      return { text: "Running background command:", shimmer: false };
     case "completed":
       return { text: "Ran background command:", shimmer: false };
     case "error":
@@ -1008,7 +1008,7 @@ function backgroundAgentVerbForStatus(status: TimelineRowStatus): {
 } {
   switch (status) {
     case "pending":
-      return { text: "Running background agent:", shimmer: true };
+      return { text: "Running background agent:", shimmer: false };
     case "completed":
       return { text: "Ran background agent:", shimmer: false };
     case "error":

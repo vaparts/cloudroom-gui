@@ -16,6 +16,7 @@ const archives = [
   ["git.tar.gz", "https://github.com/desktop/dugite-native/releases/download/v2.53.0-4/dugite-native-v2.53.0-4098283-macOS-arm64.tar.gz", "f9dc64635a5b62fbd7ad95db73268bbb8912255ac516d65d37bf7af22fcb8ffe"],
   ["git-source.tar.gz", `https://github.com/git/git/archive/${gitCommit}.tar.gz`, "89b73762be55037144c92eaf5d0657b644330770f66c584c1ba2e7b90b6218cf"],
   ["git-build-source.tar.gz", "https://github.com/desktop/dugite-native/archive/refs/tags/v2.53.0-4.tar.gz", "6600bdf3c7e2cbb127ac63d9d38da3a91267610c6034ecb8ff73e94f89508f33"],
+  ["cacert.pem", "https://curl.se/ca/cacert-2026-10-20.pem", "796f1389bfea13c0ed78f663b765baaff54a508e5483786bd6ece73c5e3e3cbe"],
 ];
 
 async function checksum(path) {
@@ -53,6 +54,7 @@ export async function prepareRuntimes() {
   }
   execFileSync("/usr/bin/tar", ["-xf", join(root, "python.tar.gz"), "-C", root]);
   execFileSync("/usr/bin/tar", ["-xf", join(root, "python-full.tar.zst"), "-C", root, "python/licenses"]);
+  await cp(join(root, "cacert.pem"), join(root, "python/cacert.pem"));
   const staging = join(root, "git-extract"), git = join(root, "git");
   await mkdir(staging);
   execFileSync("/usr/bin/tar", ["-xf", join(root, "git.tar.gz"), "-C", staging]);
@@ -72,7 +74,7 @@ export async function prepareRuntimes() {
   await writeFile(join(git, "COPYING"), execFileSync("/usr/bin/tar", ["-xOf", join(root, "git-source.tar.gz"), `git-${gitCommit}/COPYING`]));
   await writeFile(join(git, "sources/BUILD.txt"), "Git 2.53.0, unmodified core binaries from desktop/dugite-native v2.53.0-4.\nCorresponding Git sources and compilation scripts are included here.\nGit LFS and Git Credential Manager are not bundled.\n");
   await rm(staging, { recursive: true, force: true });
-  execFileSync(join(root, "python/bin/python3"), ["-I", "-B", "-c", "import ssl, sqlite3, tomllib; assert ssl.create_default_context().cert_store_stats()['x509_ca'] > 0"], { stdio: "inherit" });
+  execFileSync(join(root, "python/bin/python3"), ["-I", "-B", "-c", "import ssl, sqlite3, sys, tomllib; assert ssl.create_default_context(cafile=sys.prefix + '/cacert.pem').cert_store_stats()['x509_ca'] > 100"], { stdio: "inherit" });
   execFileSync(join(git, "bin/git"), ["--version"], { stdio: "inherit" });
   console.log("Bundled Python 3.12.13 and Git 2.53.0: checksums verified; licenses and Git sources included.");
 }

@@ -111,6 +111,11 @@ export const BUILTIN_PLUGINS = [
     defaultEnabled: true,
   },
   {
+    name: "organization",
+    pluginId: "organization",
+    defaultEnabled: false,
+  },
+  {
     name: "time-in-cloudroom",
     pluginId: "time-in-cloudroom",
     defaultEnabled: true,

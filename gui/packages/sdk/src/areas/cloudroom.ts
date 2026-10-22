@@ -226,6 +226,8 @@ export interface CloudroomArea {
   autoDelete(signal?: AbortSignal): Promise<{ days: AutoDeleteDays }>;
   /** Lists, creates, changes, runs, or deletes cloud automations. */
   automations(input: CloudAutomationRequest): Promise<CloudAutomationResponse>;
+  /** Organizations (docs/scopes/organizations.md): passes one request to the website's `/api/desktop/org`, signed in as this account. */
+  org(input: { action: string } & Record<string, unknown>): Promise<unknown>;
   setAutoDelete(days: AutoDeleteDays): Promise<{ days: AutoDeleteDays }>;
   /** Names of API keys and tokens set in this Mac's login shell, never their values. */
   macVariables(signal?: AbortSignal): Promise<{ names: string[] }>;
@@ -354,6 +356,7 @@ export function createCloudroomArea({ transport }: CreateSdkAreaArgs): Cloudroom
     updateEnvironment: (change) => transport.readJson(request("/environment", change)) as Promise<CloudEnvironment>,
     autoDelete: (signal) => transport.readJson(request("/auto-delete", undefined, signal)) as Promise<{ days: AutoDeleteDays }>,
     automations: (input) => transport.readJson(request("/automations", input)) as Promise<CloudAutomationResponse>,
+    org: (input) => transport.readJson(request("/org", input)),
     setAutoDelete: (days) => transport.readJson(request("/auto-delete", { days })) as Promise<{ days: AutoDeleteDays }>,
     macVariables: (signal) => transport.readJson(request("/environment/mac", undefined, signal)) as Promise<{ names: string[] }>,
     importMacVariables: (names) => transport.readJson(request("/environment/mac", { names })) as Promise<CloudEnvironment>,

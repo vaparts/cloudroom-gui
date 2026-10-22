@@ -115,13 +115,13 @@ function BackgroundActivitySummary({
       <span
         className={cn(
           "shrink-0 whitespace-nowrap",
-          activityMetaClass("active"),
+          activityMetaClass("running"),
         )}
       >
         {display.runningPrefix}
       </span>
       <span
-        className={cn("min-w-0 truncate", activityTextClass("active"))}
+        className={cn("min-w-0 truncate", activityTextClass("running"))}
         title={row.description}
       >
         {row.description}
@@ -130,7 +130,7 @@ function BackgroundActivitySummary({
         <span
           className={cn(
             "shrink-0 whitespace-nowrap font-mono text-2xs",
-            activityMetaClass("active"),
+            activityMetaClass("running"),
           )}
           title={`Model: ${model}`}
         >
@@ -139,7 +139,7 @@ function BackgroundActivitySummary({
       ) : null}
       {showDuration ? (
         <span
-          className={cn("shrink-0 tabular-nums", activityMetaClass("active"))}
+          className={cn("shrink-0 tabular-nums", activityMetaClass("running"))}
         >
           <LiveDurationText startedAt={row.startedAt} />
         </span>
@@ -208,7 +208,7 @@ export function ThreadBackgroundCommandsCard({
           >
             <Icon
               name={primaryDisplay.icon}
-              className={activityIconClass("active", "size-3.5 shrink-0")}
+              className={activityIconClass("running", "size-3.5 shrink-0")}
               aria-hidden="true"
             />
             {useCompactSummary ? (
@@ -218,14 +218,14 @@ export function ThreadBackgroundCommandsCard({
             ) : (
               <>
                 <BackgroundActivitySummary row={primary} showDuration={false} />
-                <span className={activityMetaClass("active", "shrink-0")}>
+                <span className={activityMetaClass("running", "shrink-0")}>
                   +{others.length} more
                 </span>
               </>
             )}
             <PromptStackCardChevron
               isExpanded={isExpanded}
-              className={activityIconClass("active")}
+              className={activityIconClass("running")}
             />
           </button>
         ) : (
@@ -235,7 +235,7 @@ export function ThreadBackgroundCommandsCard({
           >
             <Icon
               name={primaryDisplay.icon}
-              className={activityIconClass("active", "size-3.5 shrink-0")}
+              className={activityIconClass("running", "size-3.5 shrink-0")}
               aria-hidden="true"
             />
             <BackgroundActivitySummary row={primary} showDuration />

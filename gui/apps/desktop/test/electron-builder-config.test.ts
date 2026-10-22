@@ -471,6 +471,10 @@ describe("electron-builder signing config", () => {
     const requireFromRuntime = createRequire(
       resolve(desktopPackageRoot, "../../packages/bb-app/package.json"),
     );
+    // Verification only runs against the installed Electron, so pass its version.
+    const electronVersion = createRequire(
+      resolve(desktopPackageRoot, "package.json"),
+    )("electron/package.json").version;
     try {
       const ptyLib = resolve(nodeModules, "node-pty/lib");
       await mkdir(ptyLib, { recursive: true });
@@ -484,7 +488,7 @@ describe("electron-builder signing config", () => {
         { recursive: true },
       );
       const result = await runNativePrepScript(appOutDir, [
-        "--electron-version=44.3.0",
+        `--electron-version=${electronVersion}`,
       ]);
       expect(result.stderr).toBe("");
       expect(result.exitCode).toBe(0);
@@ -495,7 +499,7 @@ describe("electron-builder signing config", () => {
       );
       await writeFile(binaryPath, "invalid native binary");
       const invalidResult = await runNativePrepScript(appOutDir, [
-        "--electron-version=44.3.0",
+        `--electron-version=${electronVersion}`,
       ]);
       expect(invalidResult.exitCode).not.toBe(0);
       expect(invalidResult.stderr).toContain(binaryPath);

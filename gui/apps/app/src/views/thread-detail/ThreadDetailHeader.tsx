@@ -25,6 +25,7 @@ import {
 } from "@/components/layout/AppPageHeader";
 import {
   getBbDesktopInfo,
+  MACOS_APP_REGION_NO_DRAG_CLASS,
   MACOS_WINDOW_NO_DRAG_CLASS,
   shouldUseMacosDesktopChrome,
 } from "@/lib/bb-desktop";
@@ -241,7 +242,7 @@ export function ThreadDetailHeader({
                   HEADER_ICON_BUTTON_CLASS,
                   CHROME_SUBTLE_ICON_BUTTON_FOREGROUND_CLASS,
                   "absolute right-0 top-full z-20 mt-2",
-                  usesDesktopChrome && MACOS_WINDOW_NO_DRAG_CLASS,
+                  usesDesktopChrome && MACOS_APP_REGION_NO_DRAG_CLASS,
                 )}
                 aria-label="Side chat"
                 onClick={onStartSideChat}

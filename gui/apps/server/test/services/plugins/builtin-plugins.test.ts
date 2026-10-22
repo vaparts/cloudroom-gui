@@ -299,6 +299,7 @@ describe("builtin plugin reconciliation", () => {
       ["scheduled-send", "Calendar"],
       ["secrets", "Lock"],
       ["side-chat", "SideChat"],
+      ["organization", "UserRound"],
       ["time-in-cloudroom", "Clock"],
       ["workflows", "Workflow"],
       ["environment-git-worktree", "FolderGit"],

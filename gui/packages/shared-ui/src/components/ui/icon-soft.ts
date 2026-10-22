@@ -66,3 +66,27 @@ export const SoftAccountIcon: IconSvgElement = [
   ["circle", { cx: 12, cy: 7.75, r: 3.75, ...STROKE, key: "0" }],
   path("M4.5 20.5c.9-3.5 3.8-5.75 7.5-5.75s6.6 2.25 7.5 5.75", "1"),
 ];
+
+export const SoftFolderIcon: IconSvgElement = [
+  path(
+    "M2.5 7.5A3 3 0 0 1 5.5 4.5h3.2c.8 0 1.55.4 2 1.05l1.1 1.45H18.5a3 3 0 0 1 3 3v7.5a3 3 0 0 1-3 3h-13a3 3 0 0 1-3-3z",
+    "0",
+  ),
+  path("M2.5 10h19", "1"),
+];
+
+export const SoftLaptopIcon: IconSvgElement = [
+  path("M4 15.5V7.5A3.5 3.5 0 0 1 7.5 4h9A3.5 3.5 0 0 1 20 7.5v8", "0"),
+  path(
+    "M4 15.5h16l1.55 2.6a1.25 1.25 0 0 1-1.07 1.9H3.52a1.25 1.25 0 0 1-1.07-1.9z",
+    "1",
+  ),
+];
+
+export const SoftGitBranchIcon: IconSvgElement = [
+  ["circle", { cx: 6, cy: 5.5, r: 2.25, ...STROKE, key: "0" }],
+  ["circle", { cx: 18, cy: 5.5, r: 2.25, ...STROKE, key: "1" }],
+  ["circle", { cx: 6, cy: 18.5, r: 2.25, ...STROKE, key: "2" }],
+  path("M6 7.75v8.5", "3"),
+  path("M8.25 18.5H13a5 5 0 0 0 5-5V7.75", "4"),
+];

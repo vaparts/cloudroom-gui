@@ -32,7 +32,6 @@ import {
   FolderExportIcon,
   FolderGitTwoIcon,
   Folder02Icon,
-  FolderIcon,
   FolderSyncIcon,
   FolderUnknownIcon,
   HelpCircleIcon,
@@ -62,7 +61,12 @@ import {
   getExtendedIcons,
   subscribeExtendedIcons,
 } from "./icon-registry";
-import { SoftMoreIcon, SoftNewThreadIcon, SoftSettingsIcon } from "./icon-soft";
+import {
+  SoftFolderIcon,
+  SoftMoreIcon,
+  SoftNewThreadIcon,
+  SoftSettingsIcon,
+} from "./icon-soft";
 
 const SectionAddStrokeRoundedIcon: IconSvgElement = [
   [
@@ -129,7 +133,7 @@ const CORE_ICON_MAP = {
   Download: Download01Icon,
   Edit: Edit02Icon,
   FilterHorizontal: FilterHorizontalIcon,
-  Folder: FolderIcon,
+  Folder: SoftFolderIcon,
   FolderExport: FolderExportIcon,
   FolderGit: FolderGitTwoIcon,
   FolderPlus: FolderAddIcon,

@@ -74,6 +74,20 @@ describe("shouldSyncSelectedMergeBaseBranch", () => {
   });
 });
 
+it("keeps a Cloud thread's picked merge base, which has nowhere to persist", () => {
+  const sync = (nextStateKey: string) =>
+    shouldSyncSelectedMergeBaseBranch({
+      hasPersistedMergeBase: false,
+      previousStateKey: "thr-1",
+      nextStateKey,
+      persistedMergeBaseBranch: undefined,
+      selectedMergeBaseBranch: "release",
+      updatePending: false,
+    });
+  expect(sync("thr-1")).toBe(false);
+  expect(sync("thr-2")).toBe(true);
+});
+
 describe("resolveEffectiveMergeBaseBranch", () => {
   it("prefers the selected branch", () => {
     expect(

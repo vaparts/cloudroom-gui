@@ -13,11 +13,12 @@ import { CLOUD_HARNESSES, HARNESS_NAMES, appendStartProgress, endedTurn, isAcpPr
 import { mentionsOpenAISide401 } from "./codex-errors.js";
 import { codexOutage } from "./openai-status.js";
 import { buildThreadStatusChangeMetadata } from "../threads/thread-runtime-display.js";
-import { cloudroomSystemPrompt, prepareCloudInstructionInput, resolveCustomInstructions } from "../threads/custom-instructions.js";
-import { binding, bindings, command, commands, coreInUse, queuedPrompts, saveBinding, saveCommandState, saveStatus, effectivePrompt, projectCopyProgress, stampBindings, teleportBlocked, unstartedTurn, type Binding, type Command } from "./store.js";
+import { cloudPluginInstructions, cloudroomSystemPrompt, prepareCloudInstructionInput, resolveCustomInstructions } from "../threads/custom-instructions.js";
+import { baseBranch, binding, bindings, command, commands, coreInUse, queuedPrompts, saveBinding, saveCommandState, saveStatus, effectivePrompt, projectCopyProgress, stampBindings, teleportBlocked, unstartedTurn, type Binding, type Command } from "./store.js";
 import { copyProject, githubRepository, localProjectNote, planProjectCopy, writeFilesState, type ProjectCopyJob } from "./project-copy.js";
 import { CHILD_HINT, cloudForkOf, cloudForkPoint, FORK_HARNESSES, FORK_HINT, landForkCode, localForkPoint, startCloudFork, threadCode } from "./fork.js";
 import { copyForkSourceHistory } from "../threads/thread-fork-history.js";
+import { CloudGitError, savedWorkspacePath } from "./git.js";
 import { appendClientTurnEvent, getLastExecutionOptions } from "../threads/thread-events.js";
 import { getLeadingAgentOnlyInput, resolveDeferredFirstTurnContext } from "../threads/deferred-first-turn-context.js";
 import { deriveTitleFallback, shouldGenerateThreadTitle } from "../threads/title-generation.js";
@@ -27,7 +28,7 @@ import { inferThreadMetadata, queueThreadTitle } from "../threads/thread-metadat
 import { getLastThreadOutput } from "../threads/thread-data.js";
 import { cliPlace, reportAgentConnect, reportMacHelperProblem } from "./setup-telemetry.js";
 import { cloudSkills, copyLogins, copyMacGithub, importCodexLogin, importPiLogin, macPiSetup, setupSync, skillInCloud, stopSync, syncStatus } from "./sync.js";
-import { noteWake, setupPreviews, stopPreviews, previewStatus } from "./previews.js";
+import { macAccess, noteWake, setupPreviews, stopPreviews, previewStatus } from "./previews.js";
 import { CloudSecrets } from "./secrets.js";
 import { CodexAccounts } from "./codex-accounts.js";
 import { cancelMacCodexLogin, hasMacCodexLogin, macCodexLogin, macCodexLoginExpired, cursorKeyRejected, macCursorLogin, revokeDesktopToken, startMacCodexLogin, SANDBOX_PREFIX, SandboxAsleep, SandboxDirectory, sandboxThread, type AutomationRun, type SandboxProject, type SandboxTrigger, type SandboxWakeTrigger } from "./sandboxes.js";
@@ -153,11 +154,7 @@ export function cloudExecution(deps: Pick<AppDeps, "db">, threadId: string): "cl
   return sandboxThread(binding(deps.db, threadId)?.coreUrl ?? "") ? "cloud_sandbox" : "cloud_vm";
 }
 
-/** The branch a new cloud thread starts from, saved on its first prompt. Validated by the create request schema. */
-function baseBranch(input: string | undefined): string | undefined {
-  const branch: unknown = input ? JSON.parse(input).base_branch : undefined;
-  return typeof branch === "string" && /^(?!-)[\w./-]{1,255}$/.test(branch) ? branch : undefined;
-}
+const CHECKOUT_READ_TIMEOUT_MS = 60_000;
 
 export function isCloudThread(thread: Pick<Thread, "executionTarget">): boolean {
   return thread.executionTarget === "cloud";
@@ -433,7 +430,10 @@ class CloudroomService {
     this.sandboxes = new SandboxDirectory(async () => {
       const saved = await this.savedConnection();
       return saved?.sandboxToken && saved.account ? { website: saved.websiteUrl ?? HOSTED_WEBSITE, userId: saved.account.id, token: saved.sandboxToken } : null;
-    }, thread => void noteWake(deps, thread).catch(() => {}));
+    }, thread => {
+      void noteWake(deps, thread).catch(() => {});
+      this.macReportDue = 0;
+    });
     this.sandboxes.onRuns = runs => { for (const run of runs) this.adoptRun(run); };
     this.codexAccounts = new CodexAccounts(body => this.sandboxes.codexAccounts(body), async () => (await this.sandboxes.account())?.userId ?? null,
       join(deps.config.dataDir, "cloudroom-codex-accounts.json"), () => this.restartAwake("codex"));
@@ -814,6 +814,27 @@ class CloudroomService {
     return { ...status, explained: Boolean(detail), issue: this.previewIssue };
   }
 
+  private macReports = new Map<string, { report: string; at: number }>();
+  private macReportDue = 0;
+  private async reportMacAccess(): Promise<void> {
+    if (Date.now() < this.macReportDue) return;
+    this.macReportDue = Date.now() + 15_000;
+    const sandboxes = this.sandboxes.awakeSandboxes().filter(({ thread }) => getThread(this.deps.db, thread));
+    if (!sandboxes.length) return this.macReports.clear();
+    const status = await previewStatus(this.deps, 60_000);
+    const report = { access: await macAccess(this.deps) ?? "off", problem: status.state === "offline" && status.detail ? status.message : null };
+    const key = JSON.stringify(report), sent = this.macReports;
+    this.macReports = new Map();
+    for (const { url, token } of sandboxes) {
+      const id = `${url} ${token}`, last = sent.get(id);
+      if (last && (last.at === Infinity || (last.report === key && Date.now() - last.at < 60_000))) { this.macReports.set(id, last); continue; }
+      this.macReports.set(id, { report: key, at: Date.now() });
+      void new CloudroomClient({ url, token, timeoutMs: 5000 }).reportMac(report).catch((error: unknown) => {
+        if (error instanceof CloudroomError && (error.status === 404 || error.status === 409)) this.macReports.set(id, { report: key, at: Infinity });
+      });
+    }
+  }
+
   private ensurePreviews(capabilities: Capabilities): Promise<void> | undefined {
     if (!capabilities.previews || this.stopped || this.previewSetupEpoch === this.epoch || Date.now() < this.previewRetryAt) return;
     const epoch = this.epoch;
@@ -1074,6 +1095,20 @@ class CloudroomService {
     }
   }
 
+  /** Runs a read-only Git script in a cloud thread's checkout. Never wakes the sandbox: a sleeping one throws SandboxAsleep. */
+  async runInCheckout(threadId: string, script: string, stdin?: Buffer, signal?: AbortSignal): Promise<Buffer> {
+    const saved = binding(this.deps.db, threadId);
+    if (!saved?.sessionId) throw new CloudGitError("The cloud thread has not started yet.", null);
+    const client = await this.client(saved, false);
+    const path = savedWorkspacePath(saved.lastWorkspace) ?? (await client.sessionWorkspace(saved.sessionId, signal)).path;
+    // A start mark skips anything the login shell prints before the script runs.
+    const limit = AbortSignal.timeout(CHECKOUT_READ_TIMEOUT_MS);
+    const result = await client.runOnVm({ command: `printf '\\035'\n${script}`, cwd: path, stdin: stdin?.toString("hex") ?? "" }, signal ? AbortSignal.any([signal, limit]) : limit);
+    if (result.code !== 0 || result.truncated) throw new CloudGitError(Buffer.from(result.stderr, "hex").toString().trim() || "Git failed in the cloud sandbox.", result.code);
+    const stdout = Buffer.from(result.stdout, "hex");
+    return stdout.subarray(stdout.indexOf(0x1d) + 1);
+  }
+
   /** Wakes a sleeping cloud thread before work is sent, when the user opens it or starts typing (ADR 0176). */
   async wakeAhead(threadId: string, trigger: SandboxWakeTrigger): Promise<void> {
     const saved = binding(this.deps.db, threadId);
@@ -1158,7 +1193,7 @@ class CloudroomService {
     const serviceTier = input.service_tier === "fast" ? "fast" : "default";
     const initial = prompts.find(item => item.id === `first_${threadId}`);
     const issues = Object.values(this.connectionIssues.get(threadId) ?? {});
-    return { authRequired: !saved.sessionId && authRequiredMessages.has(saved.error ?? ""), starting: !saved.queuePaused && Boolean(initial && ["sending", "accepted"].includes(initial.state)), sessionId: saved.sessionId, paused: saved.queuePaused, failedStart: !saved.sessionId && initial?.state === "failed", model: saved.model, reasoning, serviceTier, error: saved.error ?? issues.find(issue => !issue.reconnecting)?.message ?? null, reconnecting: issues.some(issue => issue.reconnecting), usageLimit: Boolean(sandboxThread(saved.coreUrl)) && (this.sandboxes.usageLimited() || this.sandboxes.agentLimited(sandboxThread(saved.coreUrl) ?? "")), disk: this.diskStatus(threadId, saved), pendingDelivery: commands(this.deps.db, threadId).filter((c) => c.state === "sending").length };
+    return { authRequired: !saved.sessionId && authRequiredMessages.has(saved.error ?? ""), starting: !saved.queuePaused && Boolean(initial && ["sending", "accepted"].includes(initial.state)), sessionId: saved.sessionId, paused: saved.queuePaused, failedStart: !saved.sessionId && initial?.state === "failed", model: saved.model, reasoning, serviceTier, error: saved.error ?? issues.find(issue => !issue.reconnecting)?.message ?? null, reconnecting: issues.some(issue => issue.reconnecting), usageLimit: Boolean(sandboxThread(saved.coreUrl)) && (this.sandboxes.usageLimited() || this.sandboxes.agentLimited(sandboxThread(saved.coreUrl) ?? "")), disk: this.diskStatus(threadId, saved), awake: !sandboxThread(saved.coreUrl) || this.sandboxes.isAwake(sandboxThread(saved.coreUrl) ?? ""), pendingDelivery: commands(this.deps.db, threadId).filter((c) => c.state === "sending").length };
   }
 
   async create(request: CreateThreadRequest, awaitingCore = false, fork?: { sourceThreadId: string; endSequence: number }): Promise<Thread> {
@@ -1236,7 +1271,7 @@ class CloudroomService {
           ...payload, ...workspace, provider: remoteModel?.provider,
           command_guard_enabled: getAppSettings(this.deps.db).commandGuardEnabled,
           strip_ai_co_authors: getAppSettings(this.deps.db).stripAiCoAuthorsEnabled,
-          system_prompt: [cloudroomSystemPrompt(this.deps.db), projectNote].filter(Boolean).join("\n\n") || undefined,
+          system_prompt: [cloudroomSystemPrompt(this.deps.db), cloudPluginInstructions({ threadId: thread.id, projectId: thread.projectId }), projectNote].filter(Boolean).join("\n\n") || undefined,
           ...(request.serviceTier && request.serviceTier !== "default" ? { service_tier: request.serviceTier } : {}),
           ...(request.baseBranch ? { base_branch: request.baseBranch } : {}),
           ...(codeFrom ? { code_from: codeFrom } : {}),
@@ -1308,7 +1343,7 @@ class CloudroomService {
           ...payload, ...workspace, fork,
           command_guard_enabled: getAppSettings(this.deps.db).commandGuardEnabled,
           strip_ai_co_authors: getAppSettings(this.deps.db).stripAiCoAuthorsEnabled,
-          system_prompt: [cloudroomSystemPrompt(this.deps.db), projectNote].filter(Boolean).join("\n\n") || undefined,
+          system_prompt: [cloudroomSystemPrompt(this.deps.db), cloudPluginInstructions({ threadId: thread.id, projectId: thread.projectId }), projectNote].filter(Boolean).join("\n\n") || undefined,
           ...(request.serviceTier && request.serviceTier !== "default" ? { service_tier: request.serviceTier } : {}),
           ...(this.heldStarts.has(startRequestId) ? { awaiting_core: true } : {}),
         })),
@@ -1931,6 +1966,7 @@ class CloudroomService {
       void this.reportOnboarding();
       if (this.lastCapabilities) void this.ensurePreviews(this.lastCapabilities);
       void this.sandboxes.discover().catch(() => {});
+      void this.reportMacAccess().catch(() => {});
       for (const saved of bindings(this.deps.db)) {
         const thread = getThread(this.deps.db, saved.threadId);
         // Archived threads take no work. Asleep ones share one awake-list check per app (sandboxes.ts).

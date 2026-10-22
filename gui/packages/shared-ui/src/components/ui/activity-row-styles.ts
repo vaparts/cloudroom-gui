@@ -2,6 +2,7 @@ import { cn } from "../../lib/utils";
 
 export type ActivityRowState =
   | "active"
+  | "running"
   | "pending"
   | "completed"
   | "failed"
@@ -9,6 +10,8 @@ export type ActivityRowState =
 
 const ACTIVITY_ROW_CLASS: Record<ActivityRowState, string> = {
   active:
+    "rounded-md bg-background/70 px-2 py-1 shadow-xs ring-1 ring-border/60",
+  running:
     "rounded-md bg-background/70 px-2 py-1 shadow-xs ring-1 ring-border/60",
   pending: "rounded-md px-2 py-0.5",
   completed: "rounded-md px-2 py-0.5",
@@ -18,6 +21,7 @@ const ACTIVITY_ROW_CLASS: Record<ActivityRowState, string> = {
 
 const ACTIVITY_ICON_CLASS: Record<ActivityRowState, string> = {
   active: "animate-shine-icon text-foreground",
+  running: "text-foreground",
   pending: "text-muted-foreground/45",
   completed: "text-subtle-foreground",
   failed: "text-destructive-text",
@@ -26,6 +30,7 @@ const ACTIVITY_ICON_CLASS: Record<ActivityRowState, string> = {
 
 const ACTIVITY_TEXT_CLASS: Record<ActivityRowState, string> = {
   active: "animate-shine font-medium text-foreground",
+  running: "font-medium text-foreground",
   pending: "text-muted-foreground",
   completed:
     "text-subtle-foreground line-through decoration-subtle-foreground/70",
@@ -35,6 +40,7 @@ const ACTIVITY_TEXT_CLASS: Record<ActivityRowState, string> = {
 
 const ACTIVITY_META_CLASS: Record<ActivityRowState, string> = {
   active: "text-muted-foreground",
+  running: "text-muted-foreground",
   pending: "text-subtle-foreground",
   completed: "text-subtle-foreground",
   failed: "text-destructive-text",

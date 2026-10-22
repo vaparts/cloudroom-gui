@@ -651,6 +651,8 @@ export const cloudroomThreads = sqliteTable("cloudroom_threads", {
   accountId: text("account_id"),
   /** Last workspace (path, branch, head) read from the sandbox, shown while it sleeps. */
   lastWorkspace: text("last_workspace"),
+  /** Last git status read from the sandbox, shown while it sleeps. */
+  lastGitStatus: text("last_git_status"),
 });
 
 export const cloudroomCommands = sqliteTable("cloudroom_commands", {

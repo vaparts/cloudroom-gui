@@ -1162,11 +1162,7 @@ function EmbeddedThreadChatWithComposer({
           typeahead={typeaheadConfig}
           promptActions={promptActions}
           collapseResetKey={surfaceKey}
-          focusEndKey={
-            composer.focusRequestKey === undefined
-              ? composerFocusNonce
-              : `${composerFocusNonce}:${composer.focusRequestKey}`
-          }
+          focusEndKey={`${composerFocusNonce}:${composer.focusRequestKey ?? ""}:${pendingInteractionsInitialLoading}`}
           isPrimaryComposer={false}
         />
       </div>

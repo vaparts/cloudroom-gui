@@ -4,6 +4,8 @@ import { ApiError } from "../../errors.js";
 import { getThread } from "@cloudroom/db";
 import { z } from "zod";
 import { threadGoalSetRequestSchema } from "@cloudroom/server-contract";
+import { cloudGitThreadId } from "@cloudroom/domain";
+import { cloudGitResponse } from "./git.js";
 import { cloudroom, isCloudThread } from "./commands.js";
 import { cloudroomAccount } from "./account.js";
 import { checkPreviewsNow, macAccess, macAccessLevels, setMacAccess } from "./previews.js";
@@ -53,6 +55,13 @@ export function installCloudroomRoutes(app: Hono, deps: AppDeps): void {
     if (problem) return context.json({ message: "Use the local Cloudroom app or CLI." }, problem.status);
     return next();
   };
+  app.use("/api/v1/environments/:id/*", async (context, next) => {
+    const threadId = cloudGitThreadId(context.req.param("id"));
+    if (!threadId) return next();
+    const problem = browserRequestProblem(context, deps);
+    if (problem) throw new ApiError(problem.status, "forbidden_origin", problem.error);
+    return context.json(await cloudGitResponse(deps, threadId, context, (script, stdin) => cloudroom(deps).runInCheckout(threadId, script, stdin, context.req.raw.signal)));
+  });
   app.use("/api/v1/cloudroom", localOnly);
   app.use("/api/v1/cloudroom/*", localOnly);
   app.get("/api/v1/cloudroom/threads/:id/teleport", context => context.json(teleportProgress(deps.db, context.req.param("id"))));
@@ -228,6 +237,14 @@ export function installCloudroomRoutes(app: Hono, deps: AppDeps): void {
       const status = error instanceof CloudroomError ? error.status : null;
       throw new ApiError(status === 404 || status === 429 ? status : status ? 400 : 503, "cloud_automation", error instanceof Error ? error.message : String(error));
     }));
+  });
+  // Organizations (docs/scopes/organizations.md): the Organization plugin's requests, passed to the website as this account.
+  app.post("/api/v1/cloudroom/account/org", async (context) => {
+    const body = z.object({ action: z.string().min(1).max(40) }).passthrough().parse(await context.req.json());
+    return context.json(await cloudroom(deps).sandboxes.org(body).catch((error: unknown) => {
+      const status = error instanceof CloudroomError ? error.status : null;
+      throw new ApiError(status === 403 || status === 404 || status === 409 ? status : status ? 400 : 503, "cloud_org", error instanceof Error ? error.message : String(error));
+    }) as Record<string, unknown>);
   });
   // Import from this Mac: the list shows names only, and values go straight to the website.
   app.get("/api/v1/cloudroom/account/environment/mac", async (context) => context.json({ names: Object.keys(await macVariables()).sort() }));

@@ -478,6 +478,28 @@ describe("Cloudroom Connect relay", () => {
     expect((await fetchRelay(`${app}/`, { headers: { ...HTML, cookie } })).headers.get("location")).toBe("https://website.test/m");
   });
 
+  it("retires a Mac's key when it signs out or signs in to another account", async () => {
+    const asMac = (key: string, path: string, body: unknown = {}) => fetchRelay(`https://${BASE}${path}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const leaving = await register("44444444444444444444444444444444");
+    expect((await asMac(leaving.credential, "/api/computers/open", { handle })).status).toBe(200);
+    expect((await asMac(leaving.credential, "/api/unregister")).status).toBe(200);
+    expect((await asMac(leaving.credential, "/api/computers")).status).toBe(401);
+    expect((await asMac(leaving.credential, "/api/computers/open", { handle })).status).toBe(401);
+
+    const before = await register("55555555555555555555555555555555");
+    website = () => MiniflareResponse.json({ userId: "user-2" });
+    const after = await register("55555555555555555555555555555555");
+    website = () => MiniflareResponse.json({ userId: "user-1" });
+    expect((await asMac(before.credential, "/api/computers")).status).toBe(401);
+    const listed = await asMac(after.credential, "/api/computers");
+    const { computers } = (await listed.json()) as { computers: { handle: string }[] };
+    expect(computers.map((computer) => computer.handle)).not.toContain(handle);
+  });
+
   it("shows the offline page when the Mac is not connected", async () => {
     const cookie = await signInPhone();
     tunnel.close();

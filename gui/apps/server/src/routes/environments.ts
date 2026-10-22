@@ -111,7 +111,7 @@ async function mapPullRequestActionFailureTo409<TResult>(
   }
 }
 
-function toWorkspaceDiffTarget(query: EnvironmentDiffQuery) {
+export function toWorkspaceDiffTarget(query: EnvironmentDiffQuery) {
   switch (query.target) {
     case "uncommitted":
       return { type: "uncommitted" as const };

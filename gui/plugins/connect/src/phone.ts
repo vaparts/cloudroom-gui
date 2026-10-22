@@ -1,8 +1,10 @@
-import { deriveConnectBaseUrl } from "@cloudroom/connect-client";
+import { connectCredentialSchema, deriveConnectBaseUrl } from "@cloudroom/connect-client";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import type { ConnectTunnel } from "./tunnel.js";
 
 const ACCOUNT_KV_KEY = "relay-account";
+// A signed-out key the relay hasn't retired yet, because this Mac was offline.
+const RETIRE_KV_KEY = "relay-retire";
 const CHECK_INTERVAL_MS = 60_000;
 
 export class PhoneRelay {
@@ -50,10 +52,17 @@ export class PhoneRelay {
   }
 
   private async reconcile(force: boolean): Promise<void> {
+    await this.retirePending();
     const { accountId } = await this.bb.sdk.cloudroom.connectAccount();
     this.signedIn = accountId !== null;
     if (accountId === null) {
-      if (this.tunnel.getCredential() !== null) await this.tunnel.forget();
+      const signedOut = this.tunnel.getCredential();
+      if (signedOut !== null) {
+        // Retire the key on the relay too, so no saved copy can still reach the account's other Macs.
+        await this.bb.storage.kv.set(RETIRE_KV_KEY, signedOut);
+        await this.tunnel.forget();
+        await this.retirePending();
+      }
       return;
     }
     const registeredFor = await this.bb.storage.kv.get<string>(ACCOUNT_KV_KEY);
@@ -67,6 +76,18 @@ export class PhoneRelay {
       handle: registration.handle,
       credential: registration.credential,
     });
+  }
+
+  /** Offline, the key stays saved and the next check retries; only network errors and relay outages keep it. */
+  private async retirePending(): Promise<void> {
+    const saved = connectCredentialSchema.safeParse(await this.bb.storage.kv.get<unknown>(RETIRE_KV_KEY));
+    if (!saved.success) return;
+    const response = await fetch(new URL("/api/unregister", deriveConnectBaseUrl(saved.data.serverUrl)), {
+      method: "POST",
+      headers: { authorization: `Bearer ${saved.data.credential}` },
+      signal: AbortSignal.timeout(10_000),
+    }).catch(() => null);
+    if (response !== null && response.status < 500) await this.bb.storage.kv.delete(RETIRE_KV_KEY);
   }
 
   async call(path: string, body?: unknown): Promise<unknown> {

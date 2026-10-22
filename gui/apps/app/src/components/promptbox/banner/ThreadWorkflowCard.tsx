@@ -21,7 +21,7 @@ import { WorkflowPhaseStrip } from "@cloudroom/shared-ui/workflow-progress";
 const BODY_ID = "thread-workflow-card-body";
 const TOGGLE_ID = "thread-workflow-card-toggle";
 const WORKFLOW_HEADER_BUTTON_CLASS = activityRowClass(
-  "active",
+  "running",
   PROMPT_STACK_CARD_HEADER_BUTTON_CLASS,
 );
 
@@ -70,12 +70,12 @@ export function ThreadWorkflowCard({
         >
           <Icon
             name="Workflow"
-            className={activityIconClass("active", "size-3.5 shrink-0")}
+            className={activityIconClass("running", "size-3.5 shrink-0")}
             aria-hidden="true"
           />
           <span className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
             <span
-              className={activityTextClass("active", "min-w-0 truncate")}
+              className={activityTextClass("running", "min-w-0 truncate")}
               title={name}
             >
               {name}
@@ -83,7 +83,7 @@ export function ThreadWorkflowCard({
             {progress ? (
               <span
                 className={activityMetaClass(
-                  "active",
+                  "running",
                   "shrink-0 text-2xs tabular-nums",
                 )}
               >
@@ -92,7 +92,7 @@ export function ThreadWorkflowCard({
             ) : null}
             <span
               className={activityMetaClass(
-                "active",
+                "running",
                 "shrink-0 text-2xs tabular-nums",
               )}
             >
@@ -101,7 +101,7 @@ export function ThreadWorkflowCard({
           </span>
           <PromptStackCardChevron
             isExpanded={isExpanded}
-            className={activityIconClass("active")}
+            className={activityIconClass("running")}
           />
         </button>
       </div>

@@ -32,11 +32,11 @@ export async function checkPreviewsNow(deps: Deps): Promise<void> {
 }
 const statusSchema = z.object({ state: z.enum(["connected", "offline"]), count: z.number().int().nonnegative().optional(), message: z.string().max(512).optional(), detail: z.string().max(512).optional(), checkedAt: z.number() });
 
-export async function previewStatus(deps: Deps) {
+export async function previewStatus(deps: Deps, freshMs = 15_000) {
   try {
     const status = statusSchema.parse(JSON.parse(await readFile(join(folder(deps), "status.json"), "utf8")));
     const age = Date.now() - status.checkedAt;
-    const fresh = age >= -5000 && age <= 15_000;
+    const fresh = age >= -5000 && age <= freshMs;
     return { state: fresh ? status.state : "offline", count: status.count ?? 0, message: status.message ?? null, detail: fresh ? status.detail ?? null : null };
   } catch { return { state: "offline", count: 0, message: null, detail: null }; }
 }

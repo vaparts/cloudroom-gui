@@ -66,6 +66,7 @@ export interface ThreadTimelineSurfaceProps {
   resolveMentionLink?: PromptMentionLinkResolver;
   showOngoingIndicator: boolean;
   ongoingIndicatorLabel?: string;
+  ongoingIndicatorShimmer?: boolean;
   isStopping?: boolean;
   stoppingAnchorAt?: number;
   timelineErrorClassName?: string;
@@ -168,6 +169,7 @@ export function ThreadTimelineSurface({
   resolveMentionLink,
   showOngoingIndicator,
   ongoingIndicatorLabel,
+  ongoingIndicatorShimmer,
   isStopping = false,
   stoppingAnchorAt = 0,
   timelineErrorClassName = "mt-6 text-destructive",
@@ -273,6 +275,7 @@ export function ThreadTimelineSurface({
             reasoningId={activeThinking?.id}
             isThinking={showActiveThinking}
             label={ongoingIndicatorLabel}
+            shimmer={ongoingIndicatorShimmer}
           />
         </HeightTransition>
       </ConversationTimeline>

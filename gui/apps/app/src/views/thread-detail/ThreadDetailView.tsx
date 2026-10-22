@@ -8,6 +8,8 @@ import {
   type ReactNode,
 } from "react";
 import { nanoid } from "nanoid";
+import { useQueryClient } from "@tanstack/react-query";
+import { invalidateEnvironmentWorkspaceStateQueries } from "@/hooks/cache-owners/environment-cache-effects";
 import { useMediaQuery } from "@cloudroom/shared-ui/hooks/use-media-query";
 import { useSystemProviderInfo } from "@/hooks/queries/system-queries";
 import { useCloudroomConnection, cloudFeatureSupported, useOpenCloudFile, useCloudroomThread, useCloudroomThreadWorkspace } from "@/hooks/queries/cloudroom-queries";
@@ -32,6 +34,7 @@ import {
 import { serializePluginPanelParams } from "@/lib/plugin-json-value";
 import { ThreadProviderContext } from "@/components/thread/thread-provider-context";
 import {
+  cloudGitEnvironmentId,
   defaultAppSettings,
   resolveEnvironmentMergeBaseBranch,
   type ThreadListEntry,
@@ -559,9 +562,13 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
     staleTime: 5_000,
   });
   const environment = environmentQuery.data;
+  const isCloudGit = !thread?.environmentId && thread?.executionTarget === "cloud";
+  const gitEnvironmentId = isCloudGit
+    ? cloudGitEnvironmentId(thread.id)
+    : (thread?.environmentId ?? null);
   const gitDiffTabStatus = resolveGitDiffTabStatus({
-    environmentId: thread?.environmentId ?? null,
-    environmentIsGitRepo: environment?.isGitRepo,
+    environmentId: gitEnvironmentId,
+    environmentIsGitRepo: isCloudGit ? true : environment?.isGitRepo,
     environmentLoadFailed: environmentQuery.isError,
     environmentOwnsPath: environment?.managed,
     hasResolvedThread: thread !== undefined,
@@ -1263,8 +1270,17 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
   const { providers: registeredEnvironmentProviders } =
     useSystemEnvironmentProviders();
   const { providers: registeredMachineProviders } = useSystemMachineProviders();
-  const environmentMergeBaseBranch =
-    resolveEnvironmentMergeBaseBranch(environment);
+  const cloudDefaultStatusQuery = useEnvironmentWorkStatus(
+    gitEnvironmentId,
+    undefined,
+    { enabled: canUseGitUi && isCloudGit },
+  );
+  const environmentMergeBaseBranch = isCloudGit
+    ? cloudDefaultStatusQuery.data?.outcome === "available"
+      ? (cloudDefaultStatusQuery.data.workspace.mergeBase?.mergeBaseBranch ??
+        undefined)
+      : undefined
+    : resolveEnvironmentMergeBaseBranch(environment);
   const {
     clearPendingGitDiffIntent,
     closeThreadSecondaryPanel,
@@ -1285,9 +1301,7 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
     activeSecondaryTab: openFixedSecondaryTab,
     clearActiveFileTabs,
     defaultMergeBaseBranch: environmentMergeBaseBranch,
-    environmentId: canUseGitUi
-      ? (thread?.environmentId ?? undefined)
-      : undefined,
+    environmentId: canUseGitUi ? (gitEnvironmentId ?? undefined) : undefined,
     mergeBaseBranchOptionsEnabled: hasRequestedMergeBaseOptions,
     setThreadSecondaryPanel,
     threadId,
@@ -1784,7 +1798,7 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
   const handleChangedFileClick = useCallback(
     (selection: WorkspaceChangedFileSelection) => {
       const openTarget = resolveWorkspaceChangedFileOpenTarget(selection);
-      if (openTarget.kind === "preview") {
+      if (openTarget.kind === "preview" && !isCloudGit) {
         openWorkspaceFile({
           lineRange: null,
           path: selection.file.path,
@@ -1795,13 +1809,13 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
       }
       openSecondaryPanelDiffFile(selection.file.path);
     },
-    [openSecondaryPanelDiffFile, openWorkspaceFile],
+    [isCloudGit, openSecondaryPanelDiffFile, openWorkspaceFile],
   );
   const workStatusQuery = useEnvironmentWorkStatus(
-    thread?.environmentId,
-    requestedMergeBaseBranch,
+    gitEnvironmentId,
+    isCloudGit ? selectedMergeBaseBranch : requestedMergeBaseBranch,
     {
-      enabled: canUseGitUi && environment !== undefined,
+      enabled: canUseGitUi && (environment !== undefined || isCloudGit),
     },
   );
   const workspaceStatusError = workStatusQuery.error;
@@ -1819,6 +1833,36 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
   const pullRequestQuery = useEnvironmentPullRequest(thread?.environmentId, {
     enabled: canUseGitUi && environment !== undefined,
   });
+  const queryClient = useQueryClient();
+  const cloudTurnRunning =
+    isCloudGit &&
+    thread !== undefined &&
+    isRunningThreadRuntimeDisplayStatus(thread.runtime.displayStatus);
+  const cloudAwake = isCloudGit && cloudThreadState.data?.awake === true;
+  const wasCloudTurnRunning = useRef(cloudTurnRunning);
+  const wasSecondaryPanelOpen = useRef(isSecondaryPanelOpen);
+  const wasCloudAwake = useRef(cloudAwake);
+  useEffect(() => {
+    const turnEnded = wasCloudTurnRunning.current && !cloudTurnRunning;
+    const panelOpened = !wasSecondaryPanelOpen.current && isSecondaryPanelOpen;
+    const woke = !wasCloudAwake.current && cloudAwake;
+    wasCloudTurnRunning.current = cloudTurnRunning;
+    wasSecondaryPanelOpen.current = isSecondaryPanelOpen;
+    wasCloudAwake.current = cloudAwake;
+    if (isCloudGit && gitEnvironmentId && (turnEnded || panelOpened || woke)) {
+      invalidateEnvironmentWorkspaceStateQueries({
+        environmentId: gitEnvironmentId,
+        queryClient,
+      });
+    }
+  }, [
+    cloudAwake,
+    cloudTurnRunning,
+    gitEnvironmentId,
+    isCloudGit,
+    isSecondaryPanelOpen,
+    queryClient,
+  ]);
   const pullRequest = getEnvironmentPullRequestFromResponse(
     pullRequestQuery.data,
   );
@@ -3005,6 +3049,9 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
               environment: environment ?? null,
               environmentProvisioningFailure,
               environmentDisplayHost: environmentDisplayHostContext,
+              cloudWorkspacePath: isCloudGit
+                ? (cloudWorkspace.data?.path ?? null)
+                : undefined,
               workspaceStatus,
               workspaceStatusError: workspaceStatusError ?? null,
               workspaceUnavailable,
@@ -3034,7 +3081,7 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
               activeTab: activeFixedSecondaryTab,
               canUseGitUi,
               gitDiffTabStatus,
-              environmentId: thread.environmentId ?? undefined,
+              environmentId: gitEnvironmentId ?? undefined,
               workspaceRootPath: environment?.path,
               tabs: panelTabs,
               fixedTabs: secondaryPanelFixedTabs,
@@ -3044,13 +3091,13 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
               onClose: closeSecondaryPanel,
               onCollapse: closeSecondaryPanel,
               onClearPendingGitDiffIntent: clearPendingGitDiffIntent,
-              onOpenFileInEditor: handleOpenFileInEditor,
+              onOpenFileInEditor: isCloudGit ? undefined : handleOpenFileInEditor,
               onTabReorder: reorderTab,
               onOpenNewTab: handleOpenNewTab,
               onRetryGitDiffEligibility: () => {
                 void environmentQuery.refetch();
               },
-              onOpenFilePreview: handleOpenFilePreview,
+              onOpenFilePreview: isCloudGit ? undefined : handleOpenFilePreview,
               onSelectionAddToChat: handleSelectionAddToChat,
               pendingGitDiffCommitSha,
               pendingGitDiffScrollPath,

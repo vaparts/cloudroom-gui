@@ -1,4 +1,4 @@
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, getTableColumns, isNull, sql } from "drizzle-orm";
 import { cloudroomCommands, cloudroomThreads, threads, threadPluginMetadata, type DbQueryConnection } from "@cloudroom/db";
 import type { ProjectCopyProgress, TeleportLocalStep } from "@cloudroom/domain";
 import { emitPluginThreadStatusEntered } from "../plugins/plugin-thread-events.js";
@@ -40,15 +40,21 @@ export function saveProjectCopyProgress(db: DbQueryConnection, threadId: string,
     .onConflictDoUpdate({ target: [threadPluginMetadata.threadId, threadPluginMetadata.pluginId], set: { metadataJson: JSON.stringify(value) } }).run();
 }
 
-export type Binding = typeof cloudroomThreads.$inferSelect;
+// The saved Git status can be large, and bindings are read every 1.5 s, so only lastGitStatus() reads it.
+const { lastGitStatus: _lastGitStatus, ...bindingColumns } = getTableColumns(cloudroomThreads);
+export type Binding = Omit<typeof cloudroomThreads.$inferSelect, "lastGitStatus">;
 export type Command = typeof cloudroomCommands.$inferSelect;
 
 export function binding(db: DbQueryConnection, threadId: string): Binding | null {
-  return db.select().from(cloudroomThreads).where(eq(cloudroomThreads.threadId, threadId)).get() ?? null;
+  return db.select(bindingColumns).from(cloudroomThreads).where(eq(cloudroomThreads.threadId, threadId)).get() ?? null;
 }
 
 export function bindings(db: DbQueryConnection): Binding[] {
-  return db.select().from(cloudroomThreads).all();
+  return db.select(bindingColumns).from(cloudroomThreads).all();
+}
+
+export function lastGitStatus(db: DbQueryConnection, threadId: string): string | null {
+  return db.select({ value: cloudroomThreads.lastGitStatus }).from(cloudroomThreads).where(eq(cloudroomThreads.threadId, threadId)).get()?.value ?? null;
 }
 
 /** Whether a visible, unarchived thread still runs at this Core address. Hidden side chats never keep a sandbox. */
@@ -62,7 +68,7 @@ export function stampBindings(db: DbQueryConnection, accountId: string): void {
   db.update(cloudroomThreads).set({ accountId }).where(isNull(cloudroomThreads.accountId)).run();
 }
 
-export function saveBinding(db: DbQueryConnection, threadId: string, values: Partial<Omit<Binding, "threadId">>): void {
+export function saveBinding(db: DbQueryConnection, threadId: string, values: Partial<Omit<typeof cloudroomThreads.$inferSelect, "threadId">>): void {
   db.update(cloudroomThreads).set(values).where(eq(cloudroomThreads.threadId, threadId)).run();
 }
 
@@ -83,6 +89,12 @@ export function queuedPrompts(db: DbQueryConnection, threadId: string): Command[
   const order: string[] = JSON.parse(reorder.input).order;
   const rank = (id: string) => { const index = order.indexOf(id); return index === -1 ? order.length : index; };
   return queued.map((item, index) => ({ item, index })).sort((a, b) => rank(a.item.id) - rank(b.item.id) || a.index - b.index).map(({ item }) => item);
+}
+
+/** The branch a new cloud thread starts from, saved on its first prompt. Validated by the create request schema. */
+export function baseBranch(input: string | undefined): string | undefined {
+  const branch: unknown = input ? JSON.parse(input).base_branch : undefined;
+  return typeof branch === "string" && /^(?!-)[\w./-]{1,255}$/.test(branch) ? branch : undefined;
 }
 
 export function command(db: DbQueryConnection, id: string): Command | null {

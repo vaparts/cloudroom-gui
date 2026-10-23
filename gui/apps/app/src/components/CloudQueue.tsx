@@ -6,6 +6,7 @@ import { SidebarMenuItem } from "@/components/ui/sidebar";
 import { cn } from "@cloudroom/shared-ui/lib/utils";
 import { appToast } from "@/components/ui/app-toast";
 import { useCloudroomAccount } from "@/hooks/queries/cloudroom-queries";
+import { UpgradeTip } from "@/components/UpgradeTip";
 import { openUpgrade, useUpgradePromptViewed } from "@/lib/upgrade-prompt";
 
 // The cloud queue (docs/scopes/public-launch.md): Free accounts wait in line to start Cloud threads. Everything else,
@@ -91,7 +92,7 @@ const PRO_REASONS = [
   "Pro gives you 300 agent hours every month.",
   "Pro keeps cloud agents awake 4× longer, so they reply faster.",
   "Pro cloud agents never get paused when the cloud gets busy.",
-  "Pro keeps your chat history for 1 year. Free keeps 60 days.",
+  "Pro keeps your chat history up to 1 year. Free keeps 7 days.",
 ];
 let lastReason = Math.floor(Math.random() * PRO_REASONS.length);
 const nextReason = () => PRO_REASONS[(lastReason = (lastReason + 1) % PRO_REASONS.length)];
@@ -99,17 +100,8 @@ const nextReason = () => PRO_REASONS[(lastReason = (lastReason + 1) % PRO_REASON
 export function FreePlanTip() {
   const usage = useCloudroomAccount().data?.planUsage ?? null;
   const [reason] = useState(nextReason);
-  useUpgradePromptViewed(usage?.plan === "free" ? "free_tip" : null);
   if (usage?.plan !== "free") return null;
-  return (
-    <p className="mt-3 flex min-w-0 items-center gap-2 px-3.5 text-xs text-muted-foreground">
-      <Icon name="Zap" className="size-3.5 shrink-0 text-primary-text" aria-hidden />
-      <span className="truncate">{reason}</span>
-      <Button type="button" variant="link" size="sm" className="h-auto shrink-0 gap-0.5 p-0 text-xs font-semibold" onClick={() => openUpgrade("free_tip")}>
-        Upgrade<Icon name="ArrowRight" aria-hidden />
-      </Button>
-    </p>
-  );
+  return <UpgradeTip where="free_tip" className="mt-3 px-3.5">{reason}</UpgradeTip>;
 }
 
 /** Sidebar footer badge while the account waits. Says so once when the account gets in. */

@@ -1,6 +1,4 @@
-import { useEffect, useMemo } from "react";
-import type { GlobalProvider } from "@ladle/react";
-import { ThemeState } from "@ladle/react";
+import { useEffect, useMemo, type ReactNode } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { WorkerPoolContextProvider } from "@pierre/diffs/react";
 import { Provider as JotaiProvider, createStore } from "jotai";
@@ -28,8 +26,14 @@ if (typeof window !== "undefined") {
   }
 }
 
-export const Provider: GlobalProvider = ({ globalState, children }) => {
-  const isDark = globalState.theme === ThemeState.Dark;
+export const Provider = ({
+  theme,
+  children,
+}: {
+  theme: "light" | "dark";
+  children: ReactNode;
+}) => {
+  const isDark = theme === "dark";
   useEffect(() => {
     setPreferredTheme(isDark ? "dark" : "light");
   }, [isDark]);

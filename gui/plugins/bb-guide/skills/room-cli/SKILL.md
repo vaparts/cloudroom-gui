@@ -28,10 +28,15 @@ room-cli thread output THREAD
 room-cli thread tell THREAD "Continue with this task"
 room-cli thread stop THREAD
 room-cli thread update THREAD --title "New title"
+room-cli thread move THREAD --project PROJECT
 room-cli thread archive THREAD
 ```
 
+`thread move` moves a Local or Cloud thread (or `--self`) to another project by ID or name. It keeps its chat; its next turn starts fresh in that project's folder, and the old folder stays. A running thread moves when its turn ends.
+
 Make a thread a child with `room-cli thread update THREAD --parent-thread PARENT` (or `--self` as the child), or top-level with `--clear-parent-thread`. Unarchiving a child makes it top-level, so its parent stops getting its updates. Re-link it with `--parent-thread`.
+
+To move a Local thread into its own worktree, run `room-cli thread worktree`. It forks the thread, with its history, into a Cloudroom-managed worktree from its current commit, which Cloudroom deletes after archive. Never run `git worktree add` yourself; Cloudroom never cleans those folders up. Commit your changes first; then stop and tell the user to continue in the new thread.
 
 "Open" or "active" threads means threads with `archivedAt: null`. An archived thread is never open or active, whatever its `status` says. `thread list` shows open threads only; `--archived` shows only archived ones, and `--include-archived` shows both.
 
@@ -61,7 +66,7 @@ room-cli thread spawn --project PROJECT --machine cloud --provider codex \
 - Read `room-cli cloud status --json` before optional Cloud operations. Steering, compaction, attachments, message editing (`rewind`), and queue editing/cancellation depend on the connected core and harness capabilities. Forks are not enabled. Cloud automations run on a schedule while the Mac is off: `room-cli automation create --cloud --thread THREAD [--new-thread|--same-thread] [--script-file PATH]` (see the `automations` skill). Change effort with `thread update THREAD --reasoning-level LEVEL`; change the model or agent in place with `thread update THREAD [--provider PROVIDER] --model MODEL`; read both with `thread show`. `--parent-thread` with a Cloud parent starts a linked child in its own sandbox, with a copy of the parent's code. A Local parent's Cloud child (`--parent-self --machine cloud`) gets its own sandbox and messages the parent when it finishes; it starts from GitHub, so push first and pass `--base-branch BRANCH`. A capability flag is not proof that an operation completed.
 - Retry an unconfirmed start with the same `--request-id`. For a rejected start, use `room-cli cloud retry-start THREAD`. Do not blindly resend uncertain work.
 - To fix or set up the VM or a Cloud thread's sandbox, or move files, configs, and logins to it, use `room-cli vm run|pull|push`, with `--thread ID` for a sandbox (see the command index).
-- Cloud agents get a smaller `room-cli` from Core, for their own thread, children, and automations. They reach this Mac with `room-cli mac run|pull|push`, only while "Let cloud agents access this computer" is on. They can rename, archive, or change the effort of their own thread with `room-cli thread update --self --title TITLE`, `room-cli thread archive --self`, and `room-cli thread update --self --reasoning-level LEVEL`, start children in their own sandbox with `room-cli thread spawn`, and stop or archive them with `room-cli thread stop|archive CHILD_ID`. These commands control Cloud threads through the GUI backend while it is running.
+- Cloud agents get a smaller `room-cli` from Core, for their own thread, children, and automations. They reach this Mac with `room-cli mac run|pull|push`, only while "Let cloud agents access this computer" is on. They can rename, archive, move, or change the effort of their own thread with `room-cli thread update --self --title TITLE`, `room-cli thread archive --self`, `room-cli thread move --self --project PROJECT`, and `room-cli thread update --self --reasoning-level LEVEL`, start children in their own sandbox with `room-cli thread spawn`, and stop or archive them with `room-cli thread stop|archive CHILD_ID`. These commands control Cloud threads through the GUI backend while it is running.
 
 ## Verify results and Local setup
 

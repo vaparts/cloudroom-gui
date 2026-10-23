@@ -41,6 +41,8 @@ import { openTeleportLogin } from "@/components/CodexConnectionPanel";
 import { showMutationErrorToast } from "@/lib/mutation-errors";
 import { useTeleportLocal, useTeleportThread } from "@/hooks/queries/cloudroom-queries";
 import { showCloudSignIn, useCloudLocked } from "@/hooks/useCloudLocked";
+import { appToast } from "@/components/ui/app-toast";
+import { useSidebarProjects } from "@/hooks/queries/sidebar-navigation-query";
 
 interface ThreadActionsMenuBaseProps {
   thread: Thread;
@@ -66,7 +68,7 @@ interface ThreadActionsContextMenuProps extends ThreadActionsMenuBaseProps {
 }
 
 type ThreadActionsMenuSurface = "context" | "dropdown";
-type ThreadActionsCompactStep = "actions" | "move";
+type ThreadActionsCompactStep = "actions" | "move" | "project";
 
 interface ThreadActionsMenuItemsProps extends ThreadActionsMenuBaseProps {
   compactStep?: ThreadActionsCompactStep;
@@ -139,6 +141,96 @@ function ThreadSectionMoveMenu({
     );
   });
 
+  return (
+    <MoveSubmenu
+      label="Move to section"
+      drawerStep={drawerStep}
+      isDrawer={isDrawer}
+      onBack={onBack}
+      onOpenDrawerStep={onOpenDrawerStep}
+      surface={surface}
+    >
+      {items}
+    </MoveSubmenu>
+  );
+}
+
+function ThreadProjectMoveMenu({
+  drawerStep = false,
+  isDrawer,
+  onBack,
+  onOpenDrawerStep,
+  surface,
+  thread,
+}: {
+  drawerStep?: boolean;
+  isDrawer: boolean;
+  onBack?: () => void;
+  onOpenDrawerStep?: () => void;
+  surface: ThreadActionsMenuSurface;
+  thread: Thread;
+}) {
+  const projects = useSidebarProjects().filter(
+    (project) => project.id !== thread.projectId,
+  );
+  if (
+    thread.parentThreadId !== null ||
+    thread.archivedAt !== null ||
+    projects.length === 0
+  ) {
+    return null;
+  }
+  const move = async (project: { id: string; name: string }) => {
+    try {
+      const result = await sdk.threads.move({
+        threadId: thread.id,
+        projectId: project.id,
+      });
+      appToast.success(
+        result.moved
+          ? `Moved to ${project.name}`
+          : `Moves to ${project.name} when this turn ends`,
+      );
+    } catch (error) {
+      showMutationErrorToast({ error, fallbackMessage: "Could not move the thread" });
+    }
+  };
+  const Item = surface === "context" ? ContextMenuItem : DropdownMenuItem;
+  return (
+    <MoveSubmenu
+      label="Move to project"
+      drawerStep={drawerStep}
+      isDrawer={isDrawer}
+      onBack={onBack}
+      onOpenDrawerStep={onOpenDrawerStep}
+      surface={surface}
+    >
+      {projects.map((project) => (
+        <Item key={project.id} onSelect={() => void move(project)}>
+          <span className="min-w-0 flex-1 truncate">{project.name}</span>
+        </Item>
+      ))}
+    </MoveSubmenu>
+  );
+}
+
+function MoveSubmenu({
+  children,
+  drawerStep,
+  isDrawer,
+  label,
+  onBack,
+  onOpenDrawerStep,
+  surface,
+}: {
+  children: ReactNode;
+  drawerStep: boolean;
+  isDrawer: boolean;
+  label: string;
+  onBack?: () => void;
+  onOpenDrawerStep?: () => void;
+  surface: ThreadActionsMenuSurface;
+}) {
   if (isDrawer) {
     if (!drawerStep) {
       return (
@@ -149,7 +241,7 @@ function ThreadSectionMoveMenu({
           }}
         >
           <Icon name="MoveTo" aria-hidden="true" />
-          <span className="min-w-0 flex-1 truncate">Move to section</span>
+          <span className="min-w-0 flex-1 truncate">{label}</span>
           <Icon name="ChevronRight" className="ml-auto" aria-hidden="true" />
         </DropdownMenuItem>
       );
@@ -166,8 +258,8 @@ function ThreadSectionMoveMenu({
           Back
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuLabel>Move to section</DropdownMenuLabel>
-        {items}
+        <DropdownMenuLabel>{label}</DropdownMenuLabel>
+        {children}
       </>
     );
   }
@@ -182,10 +274,10 @@ function ThreadSectionMoveMenu({
     <Sub>
       <SubTrigger>
         <Icon name="MoveTo" aria-hidden="true" />
-        Move to section
+        {label}
       </SubTrigger>
       <SubContent className="max-h-[min(24rem,calc(100vh-2rem))] min-w-44 overflow-y-auto">
-        {items}
+        {children}
       </SubContent>
     </Sub>
   );
@@ -263,6 +355,18 @@ function ThreadActionsMenuItems({
     try { await sdk.threads.send({ threadId: thread.id, mode: "auto", input: [{ type: "text", text, mentions: [] }] }); }
     catch (error) { showMutationErrorToast({ error, fallbackMessage: "Could not send the request" }); }
   };
+
+  if (isDrawer && compactStep === "project") {
+    return (
+      <ThreadProjectMoveMenu
+        drawerStep
+        isDrawer
+        onBack={() => onCompactStepChange?.("actions")}
+        surface={surface}
+        thread={thread}
+      />
+    );
+  }
 
   if (isDrawer && compactStep === "move") {
     return (
@@ -351,6 +455,12 @@ function ThreadActionsMenuItems({
       <ThreadSectionMoveMenu
         isDrawer={isDrawer}
         onOpenDrawerStep={() => onCompactStepChange?.("move")}
+        surface={surface}
+        thread={thread}
+      />
+      <ThreadProjectMoveMenu
+        isDrawer={isDrawer}
+        onOpenDrawerStep={() => onCompactStepChange?.("project")}
         surface={surface}
         thread={thread}
       />

@@ -1328,6 +1328,28 @@ describe("acp bridge", () => {
     expect(agentMessageTexts()).toContain("selected-model:fake/strong");
   });
 
+  it("rebuilds the session when a turn picks a different model", async () => {
+    const envVars = { FAKE_ACP_MODEL_CONFIG: "1" };
+    const { providerThreadId } = await startThread({
+      envVars,
+      model: "fake/default",
+    });
+
+    sendTurnRequest("turn/start", providerThreadId, {
+      input: [{ type: "text", text: "echo-selected-model", mentions: [] }],
+      options: executionOptions({
+        model: "fake/strong",
+        providerOptions: { acpLaunchSpec: acpLaunchSpec({ envVars }) },
+      }),
+    });
+    await waitForTurnCompleted();
+
+    expect(agentMessageTexts()).toContain("selected-model:fake/strong");
+    expect(
+      output.messages.some((message) => message.method === "session/replaced"),
+    ).toBe(true);
+  });
+
   it("selects ACP-native models from session models state", async () => {
     const { providerThreadId } = await startThread({
       envVars: { FAKE_ACP_MODELS_FIELD: "1" },

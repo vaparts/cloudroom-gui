@@ -215,6 +215,31 @@ describe("injected skill source discovery", () => {
     ]);
   });
 
+  it("reads CRLF frontmatter with quoted values", async () => {
+    const dataDir = await makeTempDir();
+    const skillRootPath = path.join(dataDir, "skills", "windows-notes");
+    await mkdir(skillRootPath, { recursive: true });
+    await writeFile(
+      path.join(skillRootPath, "SKILL.md"),
+      '---\r\nname: windows-notes\r\ndescription: "Use when: notes come from Windows."\r\n---\r\nBody\r\n',
+      "utf8",
+    );
+    const { logger } = createCapturingLogger();
+
+    const sources = await resolveInjectedSkillSources(logger, {
+      userSkillsRootPath: path.join(dataDir, "skills"),
+    });
+
+    expect(sources).toEqual([
+      expectedTreeSource({
+        sourceType: "data-dir",
+        name: "windows-notes",
+        description: "Use when: notes come from Windows.",
+        rootPath: skillRootPath,
+      }),
+    ]);
+  });
+
   it("skips invalid skills and logs the reason", async () => {
     const dataDir = await makeTempDir();
     const skillRootPath = path.join(dataDir, "skills", "valid-name");

@@ -661,6 +661,17 @@ export type ReorderPinnedThreadRequest = z.infer<
   typeof reorderPinnedThreadRequestSchema
 >;
 
+export const moveThreadRequestSchema = z.object({
+  projectId: z.string().min(1),
+});
+export type MoveThreadRequest = z.infer<typeof moveThreadRequestSchema>;
+
+export interface MoveThreadResponse {
+  thread: ThreadResponse;
+  moved: boolean;
+  previousPath: string | null;
+}
+
 export const panelFileSourceSchema = z.enum(["workspace", "thread-storage"]);
 export type PanelFileSource = z.infer<typeof panelFileSourceSchema>;
 

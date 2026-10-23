@@ -54,6 +54,10 @@ import { acceptThreadSendRequest } from "../../services/threads/thread-send-requ
 import { editThreadMessage } from "../../services/threads/thread-edit-message.js";
 import { clearThreadContext } from "../../services/threads/thread-context-clear.js";
 import {
+  installThreadMoves,
+  moveThreadToProject,
+} from "../../services/threads/thread-move.js";
+import {
   buildExecutionOptions,
   dispatchThreadUnarchiveCommand,
   prepareTurnSubmitCommandPayload,
@@ -183,6 +187,7 @@ export function registerThreadActionRoutes(app: Hono, deps: AppDeps): void {
     onValidationError: (msg) => new ApiError(400, "invalid_request", msg),
   });
   const routes = publicApiRoutes.threads;
+  installThreadMoves(deps);
 
   post(routes.send, async (context, payload) => {
     const thread = requirePublicThread(deps.db, context.req.param("id"));
@@ -493,6 +498,15 @@ export function registerThreadActionRoutes(app: Hono, deps: AppDeps): void {
       payload.action,
     );
     return context.json({ delivered });
+  });
+
+  post(routes.move, async (context, payload) => {
+    const thread = requirePublicThread(deps.db, context.req.param("id"));
+    const result = await moveThreadToProject(deps, thread.id, payload.projectId);
+    return context.json({
+      ...result,
+      thread: toThreadResponseFromThread(deps, { thread: result.thread }),
+    });
   });
 
   post(routes.pin, (context) => {

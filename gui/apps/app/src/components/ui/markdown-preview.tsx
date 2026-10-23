@@ -37,11 +37,11 @@ import type {
 } from "react-markdown";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
-import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { ImageLightbox, getWrappedImageIndex } from "./image-lightbox.js";
 import { InlineImageGalleryContext } from "./inline-image-gallery-context.js";
+import { remarkLineBreaks } from "./markdown-line-breaks.js";
 import { normalizeMathFences } from "./markdown-math-fences.js";
 import {
   markdownMayContainMath,
@@ -1787,7 +1787,7 @@ function MarkdownPreviewComponent({
       threadMentions?.preserveSoftBreaks === true ||
       promptMentions !== undefined
     ) {
-      plugins.push(remarkBreaks);
+      plugins.push(remarkLineBreaks);
     }
     if (threadMentions !== undefined) {
       plugins.push(remarkThreadMentions);

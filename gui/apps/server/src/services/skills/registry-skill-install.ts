@@ -3,9 +3,11 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import matter from "gray-matter";
 import { ApiError } from "../../errors.js";
-import { hasSupportedFrontmatterDelimiter } from "./injected-skills.js";
+import {
+  hasSupportedFrontmatterDelimiter,
+  parseFrontmatter,
+} from "./injected-skills.js";
 import { REGISTRY_SKILL_NAME_PATTERN } from "./registry-parse.js";
 import {
   REGISTRY_SKILL_PROVENANCE_FILE_NAME,
@@ -152,7 +154,7 @@ async function validateSkillFile(
   }
   let data: Record<string, unknown>;
   try {
-    data = matter(content).data;
+    data = parseFrontmatter(content);
   } catch {
     throw new ApiError(
       422,

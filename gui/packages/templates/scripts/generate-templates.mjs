@@ -9,7 +9,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import matter from "gray-matter";
+import { parse } from "yaml";
 import { writeGeneratedFile } from "./write-generated.mjs";
 
 const packageRoot = path.resolve(
@@ -24,6 +24,13 @@ const outputPath = path.join(
   "templates.generated.ts",
 );
 const TEMPLATE_KINDS = new Set(["instruction", "prompt", "system-message"]);
+
+function parseFrontmatter(raw) {
+  const match = /^\uFEFF?---([\s\S]*?)(?:\r?\n---|$)/u.exec(raw);
+  return match
+    ? { data: parse(match[1]) ?? {}, content: raw.slice(match[0].length) }
+    : { data: {}, content: raw };
+}
 
 function asNonEmptyString(value) {
   if (typeof value !== "string") return undefined;
@@ -134,7 +141,7 @@ const validationErrors = [];
 
 for (const fileName of fileNames) {
   const raw = await readFile(path.join(templatesDir, fileName), "utf8");
-  const parsed = matter(raw);
+  const parsed = parseFrontmatter(raw);
   const kind = asNonEmptyString(parsed.data.kind) ?? "prompt";
   const id = toTemplateId(fileName);
   const variablesParsed = parseVariables(parsed.data.variables);

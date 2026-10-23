@@ -2,6 +2,20 @@
 
 Also on [cloudroom.dev/changelog](https://www.cloudroom.dev/changelog).
 
+## 116
+
+Move threads between projects (2026-10-22)
+
+### Changes
+
+- Move Local and Cloud threads to another project with `room-cli thread move`.
+- Move a Local thread into a Cloudroom-managed worktree with `room-cli thread worktree`.
+- Claude's built-in skills like `/code-review` now work in Cloud threads.
+- When a Cloud agent stops unexpectedly, the thread now shows why.
+- Big file uploads with `room-cli vm push` no longer fail.
+- Loop check scripts that print nothing now skip the run instead of failing.
+- Cloud threads run on the latest Core.
+
 ## 115
 
 Organizations in the app (2026-10-21)

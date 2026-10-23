@@ -8,7 +8,7 @@ import type { CreateThreadRequest, ForkThreadRequest, SendMessageRequest, SendMe
 import { z } from "zod";
 import { findCliExecutable } from "@cloudroom/process-utils";
 import { ApiError } from "../../errors.js";
-import { CloudroomClient, CloudroomConnectionError, CloudroomError, authRequiredMessages, type CodexAuthStatus, type SessionRecord, type VmRun, type VmRunResult } from "./client.js";
+import { CloudroomClient, CloudroomConnectionError, CloudroomError, UPLOAD_PART, authRequiredMessages, type CodexAuthStatus, type SessionRecord, type VmRun, type VmRunResult } from "./client.js";
 import { CLOUD_HARNESSES, HARNESS_NAMES, appendStartProgress, endedTurn, isAcpProvider, isCloudProvider, projectFollowUp, projectInitialPrompt, projectRecord, retractStillQueuedPrompts, type CloudProvider, type StartStep } from "./events.js";
 import { mentionsOpenAISide401 } from "./codex-errors.js";
 import { codexOutage } from "./openai-status.js";
@@ -16,7 +16,7 @@ import { buildThreadStatusChangeMetadata } from "../threads/thread-runtime-displ
 import { cloudPluginInstructions, cloudroomSystemPrompt, prepareCloudInstructionInput, resolveCustomInstructions } from "../threads/custom-instructions.js";
 import { baseBranch, binding, bindings, command, commands, coreInUse, queuedPrompts, saveBinding, saveCommandState, saveStatus, effectivePrompt, projectCopyProgress, stampBindings, teleportBlocked, unstartedTurn, type Binding, type Command } from "./store.js";
 import { copyProject, githubRepository, localProjectNote, planProjectCopy, writeFilesState, type ProjectCopyJob } from "./project-copy.js";
-import { CHILD_HINT, cloudForkOf, cloudForkPoint, FORK_HARNESSES, FORK_HINT, landForkCode, localForkPoint, startCloudFork, threadCode } from "./fork.js";
+import { CHILD_HINT, cloudForkOf, cloudForkPoint, FORK_HARNESSES, FORK_HINT, landForkCode, localForkPoint, startCloudFork, threadCode, uploadInParts } from "./fork.js";
 import { copyForkSourceHistory } from "../threads/thread-fork-history.js";
 import { CloudGitError, savedWorkspacePath } from "./git.js";
 import { appendClientTurnEvent, getLastExecutionOptions } from "../threads/thread-events.js";
@@ -357,6 +357,7 @@ class CloudroomService {
   archiveRequest?: (threadId: string) => void;
   private readonly heldStarts = new Set<string>();
   childTurnEnded?: (child: Thread & { parentThreadId: string }, status: ThreadEventTurnStatus) => void;
+  moveRequest?: (threadId: string, project: string) => void;
   teleportUrl = "";
   async teleportClient(threadId?: string): Promise<CloudroomClient> {
     const existing = threadId ? binding(this.deps.db, threadId) : null;
@@ -449,7 +450,7 @@ class CloudroomService {
   private syncLabel(threadId: string): void {
     const saved = binding(this.deps.db, threadId), thread = getThread(this.deps.db, threadId);
     if (!saved?.sessionId || !thread || sandboxThread(saved.coreUrl) !== threadId) return;
-    const label = { title: thread.title ?? thread.titleFallback ?? null, project_name: getProject(this.deps.db, thread.projectId)?.name ?? null, session: saved.sessionId, harness: thread.providerId, model: thread.modelOverride ?? saved.model, parent: thread.parentThreadId ?? null };
+    const label = { title: thread.title ?? thread.titleFallback ?? null, project_name: getProject(this.deps.db, thread.projectId)?.name ?? null, project: thread.projectId, session: saved.sessionId, harness: thread.providerId, model: thread.modelOverride ?? saved.model, parent: thread.parentThreadId ?? null };
     const key = JSON.stringify(label);
     if (this.labels.get(threadId) === key) return;
     this.labels.set(threadId, key);
@@ -905,8 +906,18 @@ class CloudroomService {
   async runOnVm(input: VmRun, threadId?: string, signal?: AbortSignal): Promise<VmRunResult> {
     const saved = threadId ? binding(this.deps.db, threadId) ?? undefined : undefined;
     if (threadId && !saved) throw new ApiError(404, "cloudroom_vm_run", "This is not a Cloud thread. Pass the ID of a Cloud thread.");
-    try { return await (await this.client(saved)).runOnVm(input, signal); }
-    catch (error) {
+    try {
+      const client = await this.client(saved);
+      if (!input.stdin || input.stdin.length <= UPLOAD_PART * 2) return await client.runOnVm(input, signal);
+      // Bigger input goes ahead in pieces, then becomes the command's stdin (feedback #442).
+      const file = `.cache/cloudroom/stdin-${randomUUID()}`;
+      try {
+        await uploadInParts(client, file, Buffer.from(input.stdin, "hex"), signal);
+        return await client.runOnVm({ command: `exec < ~/${file} && rm -f ~/${file}\n${input.command}`, cwd: input.cwd }, signal);
+      } finally {
+        await client.runOnVm({ command: `rm -f ~/${file}` }).catch(() => {});
+      }
+    } catch (error) {
       if (error instanceof ApiError && error.body.code === "cloudroom_sandbox_only") throw new ApiError(409, "cloudroom_vm_run", "Pass --thread <id> to pick which Cloud thread's sandbox runs this.");
       throw new ApiError(error instanceof CloudroomError && error.status === 409 ? 409 : 503, "cloudroom_vm_run", publicError(error));
     }
@@ -1446,6 +1457,37 @@ class CloudroomService {
 
   /** ADR 0211: a new Core session in the old session's folder. `prepare` runs once the old session is idle and caught up. */
   async switchHarness(thread: Thread, target: { providerId: string; model: string; reasoningLevel: ReasoningLevel | null }, prepare: () => Promise<(tx: DbTransaction) => void>): Promise<void> {
+    await this.restartSession(thread, { ...target, refusal: "Agents started by another agent keep their agent." }, prepare, (tx, started) => {
+      updateThread(tx, this.deps.hub, thread.id, { providerId: target.providerId });
+      saveBinding(tx, thread.id, { ...started, model: target.model, cursor: 0, nativeId: null, turnId: null, error: null });
+      setThreadExecutionOverride(tx, { threadId: thread.id, modelOverride: null, reasoningLevelOverride: target.reasoningLevel });
+    });
+  }
+
+  /** ADR 0281: a new Core session in the new project's folder, in the same sandbox. The old folder stays as it is. */
+  async moveProject(thread: Thread, projectId: string, prepare: () => Promise<(tx: DbTransaction) => void>): Promise<string | null> {
+    const saved = binding(this.deps.db, thread.id);
+    const project = getProject(this.deps.db, projectId);
+    if (!saved || !project) throw new ApiError(404, "project_not_found", "Project not found");
+    const workspace = project.id === PERSONAL_PROJECT_ID ? { workspace: ROOT_WORKSPACE } : { workspace: workspaceId(project.id), workspace_name: workspaceName(project.name) };
+    const client = await this.client(saved);
+    const previousPath = saved.sessionId ? await client.sessionWorkspace(saved.sessionId).then(({ path }) => path, () => null) : null;
+    await this.restartSession(thread, { providerId: thread.providerId, model: saved.model, reasoningLevel: null, workspace, refusal: "Agents started by another agent stay in its project." }, prepare, (tx, started) => {
+      updateThread(tx, this.deps.hub, thread.id, { projectId: project.id });
+      saveBinding(tx, thread.id, { ...started, cursor: 0, nativeId: null, turnId: null, error: null });
+      const first = command(tx, `first_${thread.id}`);
+      if (first) tx.update(cloudroomCommands).set({ input: JSON.stringify({ ...JSON.parse(first.input), ...workspace, base_branch: undefined }) }).where(eq(cloudroomCommands.id, first.id)).run();
+    });
+    if (workspace.workspace === ROOT_WORKSPACE) return previousPath;
+    const moved = binding(this.deps.db, thread.id)!;
+    const sandbox = sandboxThread(moved.coreUrl);
+    const job = await planProjectCopy(this.deps, client, thread.id, workspace.workspace, { key: sandbox ? `${sandbox}:${workspace.workspace}` : workspace.workspace });
+    if (job) this.copyInto(client, job, () => void this.ensureBranch(thread.id, true));
+    else void this.ensureBranch(thread.id, true);
+    return previousPath;
+  }
+
+  private async restartSession(thread: Thread, target: { providerId: string; model: string; reasoningLevel: ReasoningLevel | null; workspace?: { workspace: string; workspace_name?: string }; refusal: string }, prepare: () => Promise<(tx: DbTransaction) => void>, apply: (tx: DbTransaction, started: { sessionId: string; startRequestId: string; reasoning: string }) => void): Promise<void> {
     if (this.switching.has(thread.id) || this.sends.has(thread.id)) throw new ApiError(409, "thread_busy", "Wait until the message is sent, then switch.");
     this.switching.add(thread.id);
     try {
@@ -1464,16 +1506,16 @@ class CloudroomService {
       validateReasoning(target.providerId, model, reasoning, capabilities);
       const before = await this.quietSession(client, saved);
       const start = Object.values(before.receipts).find((receipt) => receipt.command === "start");
-      if (!start?.workspace) throw new ApiError(409, "cloudroom_switch", "This thread's cloud folder is unknown, so it can't switch agents.");
+      if (!start?.workspace) throw new ApiError(409, "cloudroom_switch", "This thread's cloud folder is unknown, so it can't switch.");
       const startInput = z.object({ parent_session: z.string().nullish(), parent_thread: z.string().nullish(), command_guard_enabled: z.boolean().nullish(), strip_ai_co_authors: z.boolean().nullish(), system_prompt: z.string().nullish() }).passthrough().parse(start.input);
-      if (startInput.parent_session) throw new ApiError(409, "cloudroom_switch", "Agents started by another agent keep their agent.");
-      const workspace = start.workspace.id !== "legacy" ? start.workspace.id : start.workspace.path === capabilities.repository ? undefined : ROOT_WORKSPACE;
+      if (startInput.parent_session) throw new ApiError(409, "cloudroom_switch", target.refusal);
+      const workspace = target.workspace ?? (start.workspace.id !== "legacy" ? { workspace: start.workspace.id } : start.workspace.path === capabilities.repository ? {} : { workspace: ROOT_WORKSPACE });
       if (target.providerId === "codex" && capabilities.codex_auth_import && !sandboxThread(saved.coreUrl)) await importCodexLogin(this.deps);
       if (target.providerId === "pi") await this.copyPiSetup(client, Boolean(sandboxThread(saved.coreUrl)));
       const record = await prepare();
       const startRequestId = randomUUID();
       const started = await client.start(startRequestId, CLOUD_HARNESSES[target.providerId], {
-        model, reasoning, ...(provider ? { provider } : {}), ...(workspace ? { workspace } : {}),
+        model, reasoning, ...(provider ? { provider } : {}), ...workspace,
         ...(capabilities.command_guard && typeof startInput.command_guard_enabled === "boolean" ? { command_guard_enabled: startInput.command_guard_enabled } : {}),
         ...(capabilities.strip_ai_co_authors && typeof startInput.strip_ai_co_authors === "boolean" ? { strip_ai_co_authors: startInput.strip_ai_co_authors } : {}),
         ...(capabilities.system_prompt && startInput.system_prompt ? { system_prompt: startInput.system_prompt } : {}),
@@ -1486,9 +1528,7 @@ class CloudroomService {
       }
       this.detach(thread.id);
       this.deps.db.transaction((tx) => {
-        updateThread(tx, this.deps.hub, thread.id, { providerId: target.providerId });
-        saveBinding(tx, thread.id, { sessionId: started.session_id, startRequestId, model: target.model, reasoning, cursor: 0, nativeId: null, turnId: null, error: null });
-        setThreadExecutionOverride(tx, { threadId: thread.id, modelOverride: null, reasoningLevelOverride: target.reasoningLevel });
+        apply(tx, { sessionId: started.session_id, startRequestId, reasoning });
         record(tx);
       });
       void client.close(oldSession, randomUUID()).catch((error: unknown) => this.warn("The previous Cloud session could not be closed", error, { threadId: thread.id }));
@@ -2614,6 +2654,7 @@ class CloudroomService {
             setThreadExecutionOverride(this.deps.db, { threadId: saved.threadId, reasoningLevelOverride: effort.data.reasoning });
           }
           const fresh = record.sequence > (binding(this.deps.db, saved.threadId)?.cursor ?? 0);
+          const move = fresh && record.kind === "move" && z.object({ project: z.string().min(1) }).safeParse(record.data);
           const ended = fresh ? endedTurn(record) : null;
           const turn = ended ? z.object({ request_id: z.string() }).catch({ request_id: String(record.sequence) }).parse(record.data).request_id : "";
           if (ended) this.noticeCloudParent(saved.threadId, ended, turn);
@@ -2626,6 +2667,7 @@ class CloudroomService {
           else if (ended) this.tellLocalParent(saved.threadId, ended, turn);
           // Agents archive their own thread with `room-cli thread archive --self`; like renames, this applies on reconnect.
           if (record.kind === "archive") this.archiveRequest?.(saved.threadId);
+          if (move && move.success) this.moveRequest?.(saved.threadId, move.data.project);
           if (record.kind === "secret_request") this.secrets.follow(client, saved.threadId, record);
           this.setConnectionIssue(saved.threadId, "replay");
           if (record.kind === "rewind") this.deps.hub.notifyThread(saved.threadId, ["history-rewritten"]);
@@ -2684,11 +2726,15 @@ class CloudroomService {
     const sandbox = sandboxThread(saved.coreUrl);
     const job = await planProjectCopy(this.deps, client, threadId, workspace, { key: sandbox ? `${sandbox}:${workspace}` : workspace, branch: baseBranch(input) });
     if (!job) throw new ApiError(409, "cloudroom_no_project_copy", "Nothing is left to copy, or a copy is already running.");
-    // A folder that already has files gets only its `.env` files again, so a copy cut short stays failed, never ready.
+    this.copyInto(client, job);
+  }
+
+  /** A folder that already has files gets only its `.env` files again, so a copy cut short stays failed, never ready. */
+  private copyInto(client: CloudroomClient, job: ProjectCopyJob, done?: () => void): void {
     const full = job.clone || job.copyAll;
-    const marked = full ? this.filesState(client, threadId, workspace, "copying") : Promise.resolve();
-    this.copy(client, job, (error, current = client, partial) => void marked.then(() => this.filesState(current, threadId, workspace,
-      error ?? partial ? `failed: ${error ?? partial}` : full ? "ready" : "failed: The project copy was cut short, so some files may be missing.", !full)));
+    const marked = full ? this.filesState(client, job.threadId, job.workspace, "copying") : Promise.resolve();
+    this.copy(client, job, (error, current = client, partial) => void marked.then(() => this.filesState(current, job.threadId, job.workspace,
+      error ?? partial ? `failed: ${error ?? partial}` : full ? "ready" : "failed: The project copy was cut short, so some files may be missing.", !full)).then(done));
   }
 
   private filesState(client: CloudroomClient, threadId: string, workspace: string, state: string, onlyIfCopying = false): Promise<void> {

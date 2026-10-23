@@ -24,10 +24,9 @@ branch. Under the hood it's `git worktree add` plus some bookkeeping:
 - It lives at
   `<BB_DATA_DIR>/plugins/environment-git-worktree/host-data/worktrees/<thread-id>/<repo-name>`
   — for example, `~/.bb/plugins/environment-git-worktree/host-data/worktrees/thr_abc.../myrepo`.
-- Once every thread using the environment is deleted, bb cleans the worktree up
-  (`git worktree remove --force`). Archiving the last thread starts a
-  five-minute grace period instead, so unarchiving within it keeps the
-  worktree; after it elapses the worktree is removed the same way.
+- Once every thread using it is archived or deleted, Cloudroom removes the
+  worktree (`git worktree remove --force`) after the worktree retention setting
+  (default 21 days). Unarchiving a thread before then keeps it.
 
 Worktrees are created by bb's built-in **Worktree** plugin, which is enabled by
 default. Disabling it in Settings → Plugins leaves existing worktrees alone
@@ -124,10 +123,9 @@ Contract:
 You don't need to clean up worktrees by hand. The Worktree plugin watches every
 worktree it made and removes the ones nothing is using:
 
-- Deleting the last thread on a worktree removes it right away.
-- Archiving the last thread starts a five-minute grace period. Unarchive a
-  thread within it and the worktree is kept; let it elapse and the worktree
-  goes.
+- Archiving or deleting the last thread on a worktree starts the retention
+  wait (Settings, default 21 days). Unarchive a thread within it and the
+  worktree is kept; let it elapse and the worktree goes.
 - Teleporting the last thread to Cloud shortens the wait to 2 days, or to the
   retention setting if that is shorter. "Never" still keeps it.
 

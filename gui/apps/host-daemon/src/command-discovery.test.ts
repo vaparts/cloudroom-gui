@@ -193,6 +193,21 @@ describe("discoverProviderCommands over declared roots", () => {
     });
   });
 
+  it("reads CRLF frontmatter with quoted values", async () => {
+    const fixture = await makeWorkspaceFixture();
+    await writeFileEnsuringDir(
+      path.join(fixture.cwd, ".agent", "commands", "windows.md"),
+      "---\r\ndescription: \"Saved on Windows\"\r\nargument-hint: '<file>'\r\n---\r\nBody\r\n",
+    );
+
+    const commands = await discover(fixture, fixture.cwd);
+
+    expect(byName(commands, "windows")).toMatchObject({
+      description: "Saved on Windows",
+      argumentHint: "<file>",
+    });
+  });
+
   it("tags user-home roots with origin 'user'", async () => {
     const fixture = await makeWorkspaceFixture();
     await writeFileEnsuringDir(

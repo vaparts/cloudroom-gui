@@ -11,6 +11,7 @@ import { registerOrganizationCommands } from "./organization.js";
 import { registerShowCommand } from "./show.js";
 import { registerSpawnCommand } from "./spawn.js";
 import { registerForkCommand } from "./fork.js";
+import { registerWorktreeCommand } from "./worktree.js";
 import { registerWaitCommand } from "./wait.js";
 
 export function registerThreadCommands(
@@ -27,6 +28,7 @@ export function registerThreadCommands(
   registerWaitCommand(thread, getUrl);
   registerSpawnCommand(thread, getUrl);
   registerForkCommand(thread, getUrl);
+  registerWorktreeCommand(thread, getUrl);
   registerListCommand(thread, getUrl);
   registerCountCommand(thread, getUrl);
   registerContextCommand(thread, getUrl);

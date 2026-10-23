@@ -1694,6 +1694,7 @@ export function reorderPinnedThread({
 
 export interface UpdateThreadInput {
   environmentId?: string | null;
+  projectId?: string;
   sectionId?: string | null;
   lastReadAt?: number | null;
   parentThreadId?: string | null;
@@ -1735,6 +1736,9 @@ export function updateThread(
     // "title-changed" also refreshes the thread list, which shows the harness icon.
     changes.push("execution-options-changed", "title-changed");
   }
+  const moved =
+    input.projectId !== undefined && input.projectId !== existing.projectId;
+  if (moved) changes.push("title-changed", "environment-changed");
 
   const set: Partial<typeof threads.$inferInsert> = { updatedAt: now };
   if ("title" in input) set.title = input.title;
@@ -1748,6 +1752,7 @@ export function updateThread(
   if ("parentThreadId" in input) set.parentThreadId = input.parentThreadId;
   if ("visibility" in input) set.visibility = input.visibility;
   if (input.providerId !== undefined) set.providerId = input.providerId;
+  if (moved) set.projectId = input.projectId;
 
   const updated = db
     .update(threads)
@@ -1764,9 +1769,11 @@ export function updateThread(
     });
   }
   if (updated && changes.length > 0) {
-    notifier.notifyThread(id, changes, {
-      projectId: existing.projectId,
-    });
+    notifier.notifyThread(
+      id,
+      [...new Set(changes)],
+      moved ? {} : { projectId: existing.projectId },
+    );
   }
   return updated ?? null;
 }

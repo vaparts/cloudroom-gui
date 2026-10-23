@@ -18,6 +18,8 @@ import {
   threadTabsResponseSchema,
 } from "@cloudroom/server-contract";
 import type {
+  MoveThreadRequest,
+  MoveThreadResponse,
   CreateQueuedMessageRequest,
   CreateThreadRequest,
   QueuedMessageListQuery,
@@ -322,6 +324,10 @@ export interface ThreadPinOrderArgs extends ReorderPinnedThreadRequest {
   threadId: string;
 }
 
+export interface ThreadMoveArgs extends MoveThreadRequest {
+  threadId: string;
+}
+
 export interface ThreadQueuedMessageArgs {
   signal?: AbortSignal;
   threadId: string;
@@ -589,6 +595,7 @@ export interface ThreadsArea {
   open(args: ThreadOpenArgs): Promise<ThreadOpenResult>;
   paneAction(args: ThreadPaneActionArgs): Promise<ThreadPaneActionResult>;
   output(args: ThreadOutputArgs): Promise<ThreadOutputResponse>;
+  move(args: ThreadMoveArgs): Promise<MoveThreadResponse>;
   pin(args: ThreadActionArgs): Promise<ThreadMutationResult>;
   promptHistory(
     args: ThreadPromptHistoryArgs,
@@ -1226,6 +1233,14 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
         transport.api.v1.threads[":id"]["pane-action"].$post({
           param: { id: input.threadId },
           json: { action: input.action },
+        }),
+      );
+    },
+    async move(input) {
+      return transport.readJson(
+        transport.api.v1.threads[":id"].move.$post({
+          param: { id: input.threadId },
+          json: { projectId: input.projectId },
         }),
       );
     },

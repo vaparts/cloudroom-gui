@@ -194,7 +194,7 @@ export function projectRecord(db: DbConnection, threadId: string, record: Sessio
       }
       const lastError = () => tx.select({ data: events.data }).from(events).where(and(eq(events.threadId, threadId), eq(events.type, "system/error"))).orderBy(desc(events.sequence)).limit(1).get();
       const error = receipt.error ? codexErrorFields(receipt.error, codexOutage) : null;
-      if (["failed", "unknown"].includes(receipt.state) && error && !projected.some((event) => event.type === "system/error" && event.message === error.message) && JSON.parse(lastError()?.data ?? "{}").message !== error.message) {
+      if (["failed", "unknown", "unknown_after_restart"].includes(receipt.state) && error && !projected.some((event) => event.type === "system/error" && event.message === error.message) && JSON.parse(lastError()?.data ?? "{}").message !== error.message) {
         emit({ type: "system/error", scope: threadScope(), threadId, ...error });
       }
       // Codex reports its own compaction; other harnesses only confirm it with this receipt.

@@ -15,6 +15,7 @@ import type { PluginComposerThreadRowStatus } from "@get-bb/plugin-sdk";
 import { getThreadConversationCollapsedAtom } from "@/components/secondary-panel/threadSecondaryPanelAtoms";
 import { Icon, type IconName } from "@cloudroom/shared-ui/icon";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@cloudroom/shared-ui/tooltip";
+import { HoverCardTrigger } from "@cloudroom/shared-ui/hover-card";
 import { SidebarStickyTier } from "@/components/ui/sidebar.js";
 import { NavLink } from "react-router-dom";
 import {
@@ -25,6 +26,10 @@ import {
 import { useThreadActions } from "@/components/thread/ThreadActionsProvider";
 import { useTeleportDirection } from "@/hooks/queries/cloudroom-queries";
 import { useInlineThreadTitle } from "@/components/thread/InlineThreadTitle";
+import {
+  preventPurposeOpenOnFocus,
+  SidebarThreadPurposeHoverCard,
+} from "@/components/thread/ThreadPurposeHoverCard";
 import {
   COARSE_POINTER_COMPACT_ROW_HEIGHT_CLASS,
   COARSE_POINTER_GLYPH_BOX_CLASS,
@@ -785,7 +790,7 @@ function ThreadRowComponent({
         ) : (
           <span
             className="bb-thread-title"
-            title={labelTitle}
+            title={thread.purpose ? undefined : labelTitle}
             onDoubleClick={startTitleEditing}
           >
             <ThreadTitleMentions title={threadTitle} />
@@ -928,13 +933,20 @@ function ThreadRowComponent({
   });
 
   return (
-    <ThreadActionsContextMenu
-      thread={thread}
-      onOpenInSplit={splitAvailable ? openInSplit : undefined}
-      onOpenChange={setIsContextActionsOpen}
+    <SidebarThreadPurposeHoverCard
+      purpose={isEditing ? null : (thread.purpose ?? null)}
+      threadId={thread.id}
     >
-      {row}
-    </ThreadActionsContextMenu>
+      <ThreadActionsContextMenu
+        thread={thread}
+        onOpenInSplit={splitAvailable ? openInSplit : undefined}
+        onOpenChange={setIsContextActionsOpen}
+      >
+        <HoverCardTrigger asChild onFocus={preventPurposeOpenOnFocus}>
+          {row}
+        </HoverCardTrigger>
+      </ThreadActionsContextMenu>
+    </SidebarThreadPurposeHoverCard>
   );
 }
 

@@ -53,6 +53,15 @@ export type QueuedMessageDispatchWake =
 
 type QueueDispatchDeps = LoggedPendingInteractionWorkSessionDeps;
 
+const threadReadyHooks = new WeakMap<object, (threadId: string) => Promise<void>>();
+
+export function setThreadReadyHook(
+  db: object,
+  hook: (threadId: string) => Promise<void>,
+): void {
+  threadReadyHooks.set(db, hook);
+}
+
 interface QueuedMessageDispatchRef {
   id: string;
   threadId: string;
@@ -267,6 +276,7 @@ async function runThreadReadyDispatch(
     await deps.lifecycleDedupers.queuedMessageDispatch.run(
       threadId,
       async () => {
+        await threadReadyHooks.get(deps.db)?.(threadId);
         await sendNextQueuedMessageIfPresent(deps, { threadId });
       },
     );

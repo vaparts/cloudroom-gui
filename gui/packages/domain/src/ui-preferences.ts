@@ -226,7 +226,7 @@ export const uiPreferenceDefinitions = {
   "threadPurpose.enabled": defineUiPreference(
     z.boolean(),
     true,
-    "Keep a short purpose and percent done on each thread, refreshed after every reply. Shown when hovering the thread title.",
+    "Keep a short purpose and percent done on each thread, refreshed after every reply. Shown when hovering the thread title, or a sidebar thread for 1.5s.",
   ),
   "threadPurpose.model": defineUiPreference(
     uiPreferenceStringSchema.nullable(),

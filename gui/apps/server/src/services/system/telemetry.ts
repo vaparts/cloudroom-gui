@@ -104,7 +104,7 @@ export type TelemetryEvent =
     }
   | { name: "upgrade_prompt"; properties: { where: (typeof UPGRADE_PROMPTS)[number]; action: "viewed" | "clicked" } };
 
-export const UPGRADE_PROMPTS = ["limit_notice", "disk_full", "queue", "queue_badge", "plan_card", "free_tip"] as const;
+export const UPGRADE_PROMPTS = ["limit_notice", "disk_full", "queue", "queue_badge", "plan_card", "free_tip", "auto_delete"] as const;
 const PLANS = ["free", "pro", "super", "ultra"];
 
 export type PluginTelemetryProperties = Record<string, TelemetryValue>;

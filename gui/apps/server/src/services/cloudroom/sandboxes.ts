@@ -624,14 +624,13 @@ export class SandboxDirectory {
 
   private async checkMode(): Promise<boolean> {
     const value = z.object({
-      sandboxes: z.boolean(), limited: z.boolean().default(false), small_disk: z.boolean().default(false),
+      sandboxes: z.boolean(), limited: z.boolean().default(false),
       queue: z.object({ position: z.number(), total: z.number() }).nullable().default(null), region_blocked: z.boolean().default(false),
       plan: z.string().nullable().default(null),
     }).parse(await this.call({ action: "mode" }));
     this.plan = value.plan;
     this.mode = { on: value.sandboxes, at: Date.now() };
     this.limit = { on: value.limited, at: Date.now() };
-    this.small = value.small_disk;
     this.queue = value.queue || value.region_blocked ? { position: value.queue?.position ?? 0, total: value.queue?.total ?? 0, regionBlocked: value.region_blocked } : null;
     return value.sandboxes;
   }
@@ -669,10 +668,6 @@ export class SandboxDirectory {
     // A plan change shows nothing until the next check, never the old plan's card.
     return this.usage?.value?.plan === this.plan ? this.usage.value : null;
   }
-
-  private small = false;
-  /** Free accounts get 10 GB sandboxes, so a full disk is their moment to upgrade (ADR 0206). Refreshed with usageLimited(). */
-  smallDisk(): boolean { return this.small; }
 
   /** What the account's cloud offers, read by the website from a running spare or sandbox. Null until one runs. */
   async capabilities(): Promise<unknown> {

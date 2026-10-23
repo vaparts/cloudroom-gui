@@ -87,7 +87,6 @@ export function PlanCard() {
 
 const PRO_REASONS = [
   "Pro gives you 1,000 cloud agents a month. Free gives you 100.",
-  "Pro runs your cloud agents on 2× more powerful sandboxes.",
   "Pro has no daily limit. Free stops at 50 new cloud agents a day.",
   "Pro gives you 300 agent hours every month.",
   "Pro keeps cloud agents awake 4× longer, so they reply faster.",

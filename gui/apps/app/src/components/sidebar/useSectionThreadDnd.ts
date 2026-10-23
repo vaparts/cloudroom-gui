@@ -46,6 +46,7 @@ import {
 } from "@/components/ui/useReorderDnd";
 import type { ConsumeDragClickSuppression } from "@/components/ui/use-drag-click-suppression";
 import { useNeighborReorderSortable } from "./useNeighborReorderSortable";
+import { moveThreadToProject } from "@/components/thread/ThreadActionsMenu";
 import {
   getSidebarThreadRowDroppableId,
   parseSidebarThreadRowDroppableId,
@@ -111,6 +112,7 @@ interface UseSectionThreadDndArgs {
   onTopLevelSectionOrderChange: (order: SidebarSectionId[]) => void;
   onExpandThread?: (threadId: string) => void;
   groups?: boolean;
+  projectMoves?: boolean;
   pinnedReorderPending: boolean;
   pinnedThreads: readonly ThreadListEntry[];
   pinnedRootNodes?: readonly ProjectThreadNode[];
@@ -124,6 +126,7 @@ interface SectionThreadDndLookup {
   sectionParentKeyBySectionId: Map<string, string>;
   sectionSectionIdByParentKey: Map<string, SidebarSectionId>;
   sectionIdByParentKey: Map<string, string | null>;
+  sectionNameByParentKey: Map<string, string>;
   itemIdsByParentKey: Map<string, string[]>;
   itemKindById: Map<string, ProjectThreadItem["kind"]>;
   parentKeyByItemId: Map<string, string>;
@@ -155,6 +158,14 @@ export type SectionThreadDropDecision =
     }
   | { kind: "reorder-pinned"; activeId: string; overId: string }
   | {
+      kind: "move-project";
+      activeId: string;
+      projectId: string;
+      projectName: string;
+      toParentKey: string;
+      unpin: boolean;
+    }
+  | {
       kind: "nest";
       activeId: string;
       parentThreadId: string;
@@ -165,7 +176,7 @@ export type SectionThreadDropDecision =
       kind: "rejected";
       activeId: string;
       overThreadId: string;
-      reason: "own-subtree" | "already-child";
+      reason: "own-subtree" | "already-child" | "other-project";
     };
 
 interface ThreadRowPointerInfo {
@@ -238,6 +249,7 @@ export function collectSectionThreadDndLookup(
       [PINNED_THREAD_PARENT_KEY, "pinned"],
     ]),
     sectionIdByParentKey: new Map([[containerId, null]]),
+    sectionNameByParentKey: new Map(),
     itemIdsByParentKey: new Map([
       [PINNED_THREAD_PARENT_KEY, pinnedThreads.map((thread) => thread.id)],
     ]),
@@ -297,6 +309,7 @@ export function collectSectionThreadDndLookup(
         lookup.sectionParentKeyBySectionId.set(sectionId, item.group.key);
         lookup.sectionSectionIdByParentKey.set(item.group.key, sectionId);
         lookup.sectionIdByParentKey.set(item.group.key, item.group.id);
+        lookup.sectionNameByParentKey.set(item.group.key, item.group.name);
         walk(item.group.items, item.group.key);
       }
     }
@@ -500,6 +513,40 @@ function resolveSectionThreadDropParentKey(
 
 interface ResolveSectionThreadDropDecisionOptions {
   groups?: boolean;
+  projectMoves?: boolean;
+}
+
+function getRootProjectId(
+  lookup: SectionThreadDndLookup,
+  threadId: string,
+): string | undefined {
+  let rootId = threadId;
+  for (
+    let parentId = lookup.nestParentIdByItemId.get(rootId);
+    parentId !== undefined;
+    parentId = lookup.nestParentIdByItemId.get(rootId)
+  ) {
+    rootId = parentId;
+  }
+  return lookup.threadByItemId.get(rootId)?.projectId;
+}
+
+function resolveProjectMoveDecision(
+  lookup: SectionThreadDndLookup,
+  activeId: string,
+  toParentKey: string,
+): SectionThreadDropDecision | null {
+  const projectId = lookup.sectionIdByParentKey.get(toParentKey);
+  const thread = lookup.threadByItemId.get(activeId);
+  if (!projectId || !thread || thread.parentThreadId !== null) return null;
+  return {
+    kind: "move-project",
+    activeId,
+    projectId,
+    projectName: lookup.sectionNameByParentKey.get(toParentKey) ?? projectId,
+    toParentKey,
+    unpin: lookup.parentKeyByItemId.get(activeId) === PINNED_THREAD_PARENT_KEY,
+  };
 }
 
 function resolveNestDecision(
@@ -512,6 +559,24 @@ function resolveNestDecision(
   const fromParentKey = lookup.parentKeyByItemId.get(activeId);
   const parentKey = lookup.parentKeyByItemId.get(parentThreadId);
   if (!parentThread || !fromParentKey || !parentKey) return null;
+  const parentProjectId = getRootProjectId(lookup, parentThreadId);
+  if (
+    options.projectMoves &&
+    parentProjectId !== getRootProjectId(lookup, activeId)
+  ) {
+    return (
+      resolveProjectMoveDecision(
+        lookup,
+        activeId,
+        buildSidebarEntitySectionId("project", parentProjectId ?? ""),
+      ) ?? {
+        kind: "rejected",
+        activeId,
+        overThreadId: parentThreadId,
+        reason: "other-project",
+      }
+    );
+  }
   const fromPinned = fromParentKey === PINNED_THREAD_PARENT_KEY;
   const parentPinned = parentKey === PINNED_THREAD_PARENT_KEY;
   if (isThreadWithinSubtree(lookup, activeId, parentThreadId)) {
@@ -600,6 +665,14 @@ export function resolveSectionThreadDropDecision(
 
   if (!lookup.sectionIdByParentKey.has(toParentKey)) return null;
   if (options.groups) {
+    const targetProjectId = lookup.sectionIdByParentKey.get(toParentKey);
+    if (
+      options.projectMoves &&
+      targetProjectId &&
+      targetProjectId !== getRootProjectId(lookup, activeId)
+    ) {
+      return resolveProjectMoveDecision(lookup, activeId, toParentKey);
+    }
     if (nested) return { kind: "detach", activeId, toParentKey };
     if (fromPinned) {
       return {
@@ -707,7 +780,7 @@ function resolveRowDropState(
   if (decision?.kind === "rejected") {
     return {
       threadId: decision.overThreadId,
-      state: decision.reason === "own-subtree" ? "blocked" : "unchanged",
+      state: decision.reason === "already-child" ? "unchanged" : "blocked",
     };
   }
   return null;
@@ -736,6 +809,7 @@ function resolveTargetParentKey(
     case "move":
     case "detach":
     case "unpin":
+    case "move-project":
       return decision.toParentKey;
     default:
       return null;
@@ -810,6 +884,7 @@ function hasDropDecisionLanded(
         PINNED_THREAD_PARENT_KEY
       );
     case "unpin":
+    case "move-project":
       return (
         lookup.parentKeyByItemId.get(decision.activeId) === decision.toParentKey
       );
@@ -827,6 +902,7 @@ export function useSectionThreadDnd({
   onTopLevelSectionOrderChange,
   onExpandThread,
   groups = false,
+  projectMoves = false,
   pinnedReorderPending,
   pinnedThreads,
   pinnedRootNodes,
@@ -843,7 +919,10 @@ export function useSectionThreadDnd({
       ),
     [containerId, groups, pinnedRootNodes, pinnedThreads, rootItems],
   );
-  const decisionOptions = useMemo(() => ({ groups }), [groups]);
+  const decisionOptions = useMemo(
+    () => ({ groups, projectMoves }),
+    [groups, projectMoves],
+  );
   const topLevelSectionIds = useMemo(
     () => new Set<string>(topLevelSectionOrder),
     [topLevelSectionOrder],
@@ -1144,11 +1223,9 @@ export function useSectionThreadDnd({
       );
       const nextRowDrop = resolveRowDropState(decision);
       const targetParentKey = resolveTargetParentKey(decision);
-      const nextReorderTarget = resolvePinnedReorderTarget(
-        lookup,
-        activeId,
-        decision,
-      );
+      const nextReorderTarget = pinnedReorderPending
+        ? null
+        : resolvePinnedReorderTarget(lookup, activeId, decision);
       const targetKey =
         nextRowDrop !== null
           ? getRowDropTargetKey(nextRowDrop)
@@ -1205,6 +1282,7 @@ export function useSectionThreadDnd({
       isPinnedRoot,
       lookup,
       onExpandThread,
+      pinnedReorderPending,
       projectedNestParentId,
       setCollapsedSections,
     ],
@@ -1322,25 +1400,26 @@ export function useSectionThreadDnd({
           const insertRequest = reorderTarget
             ? buildPinInsertRequest(lookup, decision.activeId, reorderTarget)
             : null;
-          const pin = () =>
-            pinThread.mutateAsync({ id: decision.activeId }).then(() => {
-              if (insertRequest) {
-                onReorderPinnedThread(insertRequest, {
-                  onSettled: () => undefined,
-                });
-              }
-            });
           if (decision.detach) {
-            updateThread
-              .mutateAsync({ id: decision.activeId, parentThreadId: null })
-              .then(pin)
-              .catch(() => undefined)
-              .finally(clearProjectedDrag);
-          } else {
-            pin()
-              .catch(() => undefined)
-              .finally(clearProjectedDrag);
+            updateThread.mutate({
+              id: decision.activeId,
+              parentThreadId: null,
+            });
           }
+          pinThread.mutate(
+            {
+              id: decision.activeId,
+              ...(insertRequest
+                ? {
+                    position: {
+                      previousThreadId: insertRequest.previousItemId,
+                      nextThreadId: insertRequest.nextItemId,
+                    },
+                  }
+                : {}),
+            },
+            { onSettled: clearProjectedDrag },
+          );
           break;
         }
         case "unpin":
@@ -1358,6 +1437,19 @@ export function useSectionThreadDnd({
               { onSettled: clearProjectedDrag },
             );
           }
+          break;
+        case "move-project":
+          moveThreadToProject(decision.activeId, {
+            id: decision.projectId,
+            name: decision.projectName,
+          })
+            .then((moved) =>
+              moved && decision.unpin
+                ? unpinThread.mutateAsync({ id: decision.activeId })
+                : undefined,
+            )
+            .catch(() => undefined)
+            .finally(clearProjectedDrag);
           break;
         case "reorder-pinned":
           handlePinnedDragEnd(event);
@@ -1379,7 +1471,6 @@ export function useSectionThreadDnd({
       enabled,
       handlePinnedDragEnd,
       lookup,
-      onReorderPinnedThread,
       onTopLevelSectionOrderChange,
       pinThread,
       projectedNestParentId,

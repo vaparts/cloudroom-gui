@@ -473,6 +473,11 @@ export function ThreadDetailPromptArea({
     threadId: thread.id,
     errorMessage: "Failed to save thread execution settings.",
   });
+  const saveReasoning = useUpdateThread({
+    threadId: thread.id,
+    errorMessage: "Failed to save thread execution settings.",
+    reasoning: true,
+  });
   const isExecutionUpdatePending =
     useIsMutating({ mutationKey: ["thread-update", thread.id] }) > 0;
   const retryCloudStart = useRetryCloudStart(thread.id);
@@ -765,7 +770,11 @@ export function ThreadDetailPromptArea({
     ? cloudReasoning
     : resolveModelReasoningLevel(
         activeModel,
-        defaultExecutionOptions?.reasoningLevel ?? reasoningLevel,
+        (saveReasoning.isPending
+          ? saveReasoning.variables?.reasoningLevel
+          : undefined) ??
+          defaultExecutionOptions?.reasoningLevel ??
+          reasoningLevel,
       );
   const handleReasoningChange = useCallback(
     (level: ReasoningLevel) => {
@@ -773,7 +782,7 @@ export function ThreadDetailPromptArea({
         setCloudReasoning.mutate(level);
         return;
       }
-      updateExecution({
+      saveReasoning.mutate({
         id: thread.id,
         reasoningLevel: level,
         ...(effectiveSelectedModel !== defaultExecutionOptions?.model
@@ -783,7 +792,7 @@ export function ThreadDetailPromptArea({
     },
     [
       setCloudReasoning.mutate,
-      updateExecution,
+      saveReasoning.mutate,
       thread.id,
       isCloud,
       effectiveSelectedModel,

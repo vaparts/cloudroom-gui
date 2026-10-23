@@ -11,7 +11,11 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import type { NeighborReorderRequest } from "@cloudroom/client-core";
-import { DropPreviewRow, ThreadTreeNodeRow } from "./ProjectRow";
+import {
+  DropPreviewRow,
+  getDragGhostStyle,
+  ThreadTreeNodeRow,
+} from "./ProjectRow";
 import {
   useSidebarSortable,
   type SidebarSortableDragBindings,
@@ -112,20 +116,9 @@ const SortablePinnedRootItem = memo(function SortablePinnedRootItem({
     disabled,
     displace,
   });
-  const hasProjectedDestination =
-    props.sectionDnd != null &&
-    (props.sectionDnd.dragOverParentKey !== null ||
-      props.sectionDnd.nestTarget?.state === "valid" ||
-      props.sectionDnd.reorderTarget !== null);
-  const sortableStyle: CSSProperties =
+  const sortableStyle =
     props.sectionDnd?.activeThread?.id === getPinnedRootNodeId(node)
-      ? {
-          ...style,
-          opacity: 0,
-          pointerEvents: "none",
-          position: hasProjectedDestination ? "absolute" : style.position,
-          width: hasProjectedDestination ? "100%" : undefined,
-        }
+      ? getDragGhostStyle(style)
       : style;
 
   return (
@@ -216,14 +209,11 @@ export const PinnedThreadTree = memo(function PinnedThreadTree({
           {chronologicalRootNodes.map((node) => (
             <Fragment key={getPinnedRootNodeId(node)}>
               {previewBeforeKey === `thread:${getPinnedRootNodeId(node)}` ? (
-                <DropPreviewRow
-                  depth={0}
-                  thread={chronologicalDnd.activeThread}
-                />
+                <DropPreviewRow depth={0} />
               ) : null}
               <SortablePinnedRootItem
                 node={node}
-                disabled={chronologicalDnd.pinnedReorderPending}
+                disabled={false}
                 displace={false}
                 sectionDnd={chronologicalDnd}
                 selectedThreadId={selectedThreadId}
@@ -234,12 +224,7 @@ export const PinnedThreadTree = memo(function PinnedThreadTree({
             </Fragment>
           ))}
         </SortableContext>
-        <DropPreviewRow
-          animate={chronologicalDnd.activeThread !== null}
-          depth={0}
-          visible={showDropPreview}
-          thread={chronologicalDnd.activeThread}
-        />
+        <DropPreviewRow depth={0} visible={showDropPreview} />
       </div>
     );
   }

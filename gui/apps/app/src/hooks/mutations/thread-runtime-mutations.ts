@@ -16,6 +16,7 @@ import type {
   EditMessageMutationRequest,
   SendThreadMessageMutationRequest,
 } from "./mutation-request-types";
+import { waitForThreadReasoningSave } from "./thread-state-mutations";
 import {
   applyCreateThreadResult,
   applyQueuedMessageCreateResult,
@@ -178,6 +179,7 @@ export function useSendThreadMessage() {
       pluginSubmission,
       executionInputSources,
     }: SendThreadMessageMutationRequest) => {
+      await waitForThreadReasoningSave(queryClient, id);
       return await sdk.threads.send({
         threadId: id,
         ...(requestId ? { requestId } : {}),
@@ -248,7 +250,7 @@ export function useCreateThreadQueuedMessage() {
       lifecycleOperation: "queue_message",
       showErrorToast: false,
     },
-    mutationFn: ({
+    mutationFn: async ({
       id,
       input,
       model,
@@ -258,8 +260,9 @@ export function useCreateThreadQueuedMessage() {
       senderThreadId,
       executionInputSources,
       hardQueue,
-    }: CreateThreadQueuedMessageMutationRequest): Promise<ThreadQueuedMessage> =>
-      sdk.threads.queuedMessages.create({
+    }: CreateThreadQueuedMessageMutationRequest): Promise<ThreadQueuedMessage> => {
+      await waitForThreadReasoningSave(queryClient, id);
+      return sdk.threads.queuedMessages.create({
         threadId: id,
         input,
         model,
@@ -269,7 +272,8 @@ export function useCreateThreadQueuedMessage() {
         executionInputSources,
         ...(senderThreadId !== undefined ? { senderThreadId } : {}),
         ...(hardQueue === true ? { hardQueue } : {}),
-      }),
+      });
+    },
     onMutate: async (variables): Promise<CreateQueuedMessageTransaction> =>
       beginCreateQueuedMessageTransaction({
         queryClient,

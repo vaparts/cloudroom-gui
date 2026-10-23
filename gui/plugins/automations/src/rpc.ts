@@ -11,6 +11,7 @@ import {
   linkThreadInputSchema,
   listAutomationsInputSchema,
   projectAutomationInputSchema,
+  reasoningLevelSchema,
   reviewMarkInputSchema,
   reviewResponseSchema,
   runAutomationInputSchema,
@@ -25,6 +26,19 @@ const cloudAutomationInputSchema = z
     action: z.enum(["list", "create", "update", "run", "delete", "hook"]),
   })
   .passthrough();
+
+const cloudTemplateInputSchema = z
+  .object({
+    projectId: z.string().min(1),
+    name: z.string().min(1),
+    prompt: z.string().min(1),
+    cron: z.string().min(1),
+    timezone: z.string().min(1),
+    providerId: z.string().min(1),
+    model: z.string().min(1),
+    reasoningLevel: reasoningLevelSchema,
+  })
+  .strict();
 
 export const automationRpcContract = defineRpcContract({
   automations_overview: {
@@ -89,6 +103,10 @@ export const automationRpcContract = defineRpcContract({
     input: cloudAutomationInputSchema,
     output: z.unknown(),
   },
+  cloud_template_add: {
+    input: cloudTemplateInputSchema,
+    output: z.unknown(),
+  },
 });
 
 type Sdk = Pick<BbPluginApi["sdk"], "cloudroom" | "threads">;
@@ -97,15 +115,16 @@ type CloudAutomation = NonNullable<
   Awaited<ReturnType<Cloud["automations"]>>["automation"]
 >;
 
+type CloudThread = Awaited<ReturnType<Sdk["threads"]["get"]>>;
+
 async function cloudThreadAgent(
   threads: Sdk["threads"],
-  threadId: string,
+  thread: CloudThread,
 ): Promise<AutomationAgentSummary | null> {
   try {
-    const [thread, options] = await Promise.all([
-      threads.get({ threadId }),
-      threads.defaultExecutionOptions({ threadId }),
-    ]);
+    const options = await threads.defaultExecutionOptions({
+      threadId: thread.id,
+    });
     return {
       providerId: "providerId" in thread ? thread.providerId : null,
       model: options?.model ?? null,
@@ -122,20 +141,87 @@ async function withCloudAgents(threads: Sdk["threads"], result: unknown) {
   };
   return {
     ...(result as object),
-    // A fresh-thread loop's own saved agent; otherwise its thread's, which it uses.
+    // A fresh-thread loop's own saved agent; otherwise its thread's, which it uses. Its project is its thread's.
     automations: await Promise.all(
-      automations.map(async (automation) => ({
-        ...automation,
-        agent: automation.agent
-          ? {
-              providerId: automation.agent.provider,
-              model: automation.agent.model,
-              reasoningLevel: automation.agent.reasoning,
-            }
-          : await cloudThreadAgent(threads, automation.thread_id),
-      })),
+      automations.map(async (automation) => {
+        const thread = await threads
+          .get({ threadId: automation.thread_id })
+          .catch(() => null);
+        return {
+          ...automation,
+          project_id: thread && "projectId" in thread ? thread.projectId : null,
+          agent: automation.agent
+            ? {
+                providerId: automation.agent.provider,
+                model: automation.agent.model,
+                reasoningLevel: automation.agent.reasoning,
+              }
+            : thread
+              ? await cloudThreadAgent(threads, thread)
+              : null,
+        };
+      }),
     ),
   };
+}
+
+const HOST_START_TIMEOUT_MS = 5 * 60_000;
+
+async function hasCloudSession(sdk: Sdk, threadId: string): Promise<boolean> {
+  const status = (await sdk.cloudroom
+    .threadStatus(threadId)
+    .catch(() => null)) as { sessionId?: string | null } | null;
+  return Boolean(status?.sessionId);
+}
+
+// A Cloud loop needs an open, started Cloud thread in its project: the newest one, else a new one started for it.
+async function cloudTemplateHost(
+  sdk: Sdk,
+  input: z.output<typeof cloudTemplateInputSchema>,
+): Promise<string> {
+  const threads = await sdk.threads.list({
+    projectId: input.projectId,
+    archived: false,
+  });
+  const open = threads
+    .filter(
+      (thread) =>
+        thread.executionTarget === "cloud" &&
+        thread.archivedAt === null &&
+        thread.deletedAt === null,
+    )
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+  for (const thread of open) {
+    // "starting" may still be copying the project into its sandbox.
+    if (thread.status !== "idle" && thread.status !== "active") continue;
+    if (await hasCloudSession(sdk, thread.id)) return thread.id;
+  }
+  const thread = await sdk.threads.spawn({
+    projectId: input.projectId,
+    executionTarget: "cloud",
+    environment: { type: "project-default" },
+    title: `${input.name} loop`,
+    providerId: input.providerId,
+    model: input.model,
+    reasoningLevel: "low",
+    prompt: `This Cloud thread hosts the "${input.name}" loop, added from Loops → Templates. Each run starts its own fresh thread. First run \`room-cli files wait\`. If it says the project copy failed, reply with one word: Failed. Otherwise reply with one word: Ready.`,
+  });
+  // The session exists before the project finishes copying, so wait for the reply its prompt gives after `files wait`.
+  const deadline = Date.now() + HOST_START_TIMEOUT_MS;
+  for (;;) {
+    const status = (await sdk.threads.get({ threadId: thread.id }))?.status;
+    if (status === "error")
+      throw new Error("its new Cloud thread failed to start");
+    if (status === "idle") {
+      const { output } = await sdk.threads.output({ threadId: thread.id });
+      if (/\bready\b/i.test(output ?? "")) return thread.id;
+      if (output)
+        throw new Error("its project did not finish copying to the cloud");
+    }
+    if (Date.now() > deadline)
+      throw new Error("its new Cloud thread did not start within 5 minutes");
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
+  }
 }
 
 export function createRpcHandlers(service: AutomationService, sdk?: Sdk) {
@@ -150,6 +236,22 @@ export function createRpcHandlers(service: AutomationService, sdk?: Sdk) {
       return input.action === "list"
         ? withCloudAgents(sdk.threads, result)
         : result;
+    },
+    async cloud_template_add(
+      input: z.output<typeof cloudTemplateInputSchema>,
+    ) {
+      if (!sdk) throw new Error("Cloud loops are unavailable.");
+      return sdk.cloudroom.automations({
+        action: "create",
+        thread: await cloudTemplateHost(sdk, input),
+        name: input.name,
+        prompt: input.prompt,
+        cron: input.cron,
+        timezone: input.timezone,
+        harness: input.providerId,
+        model: input.model,
+        reasoning: input.reasoningLevel,
+      });
     },
     automations_overview() {
       return service.overview();

@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CompactViewportOverrideProvider } from "@cloudroom/shared-ui/hooks/use-compact-viewport";
 import { AutomationOverviewView } from "bb-plugin-automations/overview-view";
@@ -127,15 +133,9 @@ describe("AutomationOverviewView", () => {
     const rowTitles = () =>
       Array.from(
         container.querySelectorAll<HTMLElement>("[data-resource-row]"),
-        (row) => row.querySelector("button")?.textContent,
+        (row) =>
+          row.querySelector("button:not([data-row-action])")?.textContent,
       );
-    expect(rowTitles()).toEqual([
-      "Aardvark pending",
-      "Alpha active",
-      "Zulu active",
-    ]);
-
-    fireEvent.click(screen.getByRole("button", { name: /Paused & finished/ }));
     expect(rowTitles()).toEqual([
       "Aardvark pending",
       "Alpha active",
@@ -312,7 +312,8 @@ describe("AutomationOverviewView", () => {
     const rowTitles = () =>
       Array.from(
         container.querySelectorAll<HTMLElement>("[data-resource-row]"),
-        (row) => row.querySelector("button")?.textContent,
+        (row) =>
+          row.querySelector("button:not([data-row-action])")?.textContent,
       );
 
     expect(rowTitles()).toEqual(["Nightly digest"]);
@@ -498,42 +499,6 @@ describe("AutomationOverviewView", () => {
     expect(nameOption.getAttribute("aria-checked")).toBe("true");
   });
 
-  it("renders template actions as icon-only controls with specific labels", () => {
-    const onCreateViaChat = vi.fn();
-    const { container } = render(
-      <AutomationOverviewView
-        entries={[]}
-        error={null}
-        onRetry={() => {}}
-        onOpenDetail={() => {}}
-        onEnabledChange={async () => {}}
-        onCreateViaChat={onCreateViaChat}
-        activeMode="browse"
-        onModeChange={() => {}}
-      />,
-    );
-
-    const ciTemplateButton = screen.getByRole("button", {
-      name: "Use template: CI failure triage",
-    });
-    expect(
-      ciTemplateButton.querySelector('[data-icon="MessageCirclePlus"]'),
-    ).toBeTruthy();
-    expect(ciTemplateButton.textContent).toBe("");
-    expect(
-      screen.getAllByRole("button", {
-        name: "Use template: CI failure triage",
-      }),
-    ).toHaveLength(1);
-
-    fireEvent.click(
-      container.querySelector(
-        '[data-resource-card-pointer-action=""]',
-      ) as HTMLElement,
-    );
-    expect(onCreateViaChat).toHaveBeenCalledOnce();
-  });
-
   it("shows each automation's agents, schedule, and next run", () => {
     const base = INSTALLED_AUTOMATIONS[0]!;
     if ("problem" in base.automation) throw new Error("Expected a fixture");
@@ -584,7 +549,7 @@ describe("AutomationOverviewView", () => {
     expect(digest.textContent).toContain("Claude Code·Opus 5·Medium");
     expect(digest.textContent).toContain("9AM");
     expect(digest.textContent).toMatch(/in \d+d/);
-    expect(digest.querySelector('[aria-label="Not run yet"]')).toBeTruthy();
+    expect(digest.querySelector('[aria-label^="Priority 3 "]')).toBeTruthy();
     expect(row("Security sweep").textContent).toContain(
       "Codex ⇄ Claude Code·GPT-6.1 Sol ⇄ Opus 5.5 (1M)·Max",
     );
@@ -668,5 +633,124 @@ describe("AutomationOverviewView", () => {
         '[aria-label="Local project"] [data-icon="Laptop"]',
       ),
     ).toBeNull();
+  });
+  it("keeps priorities set in other windows and follows their changes", async () => {
+    window.localStorage.clear();
+    const base = INSTALLED_AUTOMATIONS[0]!;
+    const second = {
+      ...base,
+      automation: { ...base.automation, id: "auto_2", name: "Weekly report" },
+    };
+    render(
+      <AutomationOverviewView
+        entries={[base, second]}
+        error={null}
+        onRetry={() => {}}
+        onOpenDetail={() => {}}
+        onEnabledChange={async () => {}}
+        onCreateViaChat={() => {}}
+        activeMode="installed"
+        onModeChange={() => {}}
+      />,
+    );
+    window.localStorage.setItem(
+      "cloudroom-loops:priorities",
+      JSON.stringify({ "local:auto_1": 1 }),
+    );
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: /^Priority 3 for Weekly report/ }),
+      { button: 0, ctrlKey: false },
+    );
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: /Priority 2/ }),
+    );
+    expect(
+      JSON.parse(window.localStorage.getItem("cloudroom-loops:priorities")!),
+    ).toEqual({ "local:auto_1": 1, "local:auto_2": 2 });
+    window.localStorage.setItem(
+      "cloudroom-loops:priorities",
+      JSON.stringify({ "local:auto_1": 4, "local:auto_2": 2 }),
+    );
+    expect(
+      screen.getByRole("button", { name: /^Priority 1 for Nightly digest/ }),
+    ).toBeTruthy();
+    fireEvent(
+      window,
+      new StorageEvent("storage", { key: "cloudroom-loops:priorities" }),
+    );
+    expect(
+      screen.getByRole("button", { name: /^Priority 4 for Nightly digest/ }),
+    ).toBeTruthy();
+    window.localStorage.clear();
+  });
+
+  it("gives loops added from a template the template's priority", async () => {
+    window.localStorage.clear();
+    const onAdd = vi.fn(async () => ["cloud:loop_new"]);
+    render(
+      <AutomationOverviewView
+        entries={[]}
+        error={null}
+        onRetry={() => {}}
+        onOpenDetail={() => {}}
+        onEnabledChange={async () => {}}
+        onCreateViaChat={() => {}}
+        activeMode="templates"
+        onModeChange={() => {}}
+        templates={{
+          projects: [{ id: "proj_1", name: "Repo one", path: "/repo-one" }],
+          onAdd,
+        }}
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Add Security sweep to repos" }),
+    );
+    fireEvent.click(await screen.findByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: "Add to 1 repo" }));
+    await waitFor(() =>
+      expect(
+        JSON.parse(window.localStorage.getItem("cloudroom-loops:priorities")!),
+      ).toEqual({ "cloud:loop_new": 1 }),
+    );
+    expect(onAdd).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Security sweep" }),
+      ["proj_1"],
+      "cloud",
+    );
+    window.localStorage.clear();
+  });
+
+  it("tags loops whose last run failed", () => {
+    const base = INSTALLED_AUTOMATIONS[0]!;
+    const failed = {
+      ...base,
+      automation: {
+        ...base.automation,
+        id: "auto_2",
+        name: "Broken sync",
+        lastRunStatus: "failed" as const,
+        lastError: "Agent exited with code 1",
+      },
+    };
+    render(
+      <AutomationOverviewView
+        entries={[base, failed]}
+        error={null}
+        onRetry={() => {}}
+        onOpenDetail={() => {}}
+        onEnabledChange={async () => {}}
+        onCreateViaChat={() => {}}
+        activeMode="installed"
+        onModeChange={() => {}}
+      />,
+    );
+    const row = (name: string) =>
+      screen.getByText(name).closest<HTMLElement>("[data-resource-row]")!;
+    expect(row("Broken sync").textContent).toContain("Failed");
+    expect(
+      row("Broken sync").querySelector('[title="Agent exited with code 1"]'),
+    ).toBeTruthy();
+    expect(row("Nightly digest").textContent).not.toContain("Failed");
   });
 });

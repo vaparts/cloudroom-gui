@@ -1905,7 +1905,11 @@ export interface RenderedSlot
   readonly lifecycle: RenderedSlotLifecycleControls;
 }
 
-function strictJsonRoundTrip(value: unknown, label: string): JsonValue {
+function strictJsonRoundTrip(
+  value: unknown,
+  label: string,
+  omitUndefinedFields = false,
+): JsonValue {
   const ancestors = new Set<object>();
   function visit(current: unknown, path: string): void {
     if (
@@ -1941,6 +1945,7 @@ function strictJsonRoundTrip(value: unknown, label: string): JsonValue {
         throw new Error(`${label} at ${path} contains a symbol key`);
       }
       for (const [key, child] of Object.entries(current)) {
+        if (omitUndefinedFields && child === undefined) continue;
         visit(child, `${path}.${key}`);
       }
     } finally {
@@ -1970,7 +1975,7 @@ export function renderSlot<
       const normalizedInput =
         input === undefined
           ? null
-          : strictJsonRoundTrip(input, `rpc "${method}" input`);
+          : strictJsonRoundTrip(input, `rpc "${method}" input`, true);
       rpcCalls.push({ method, input: normalizedInput });
       const handler = rpcHandlers[method];
       if (!handler) {

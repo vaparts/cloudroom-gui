@@ -1166,12 +1166,6 @@ class CloudroomService {
     return getThreadExecutionOverride(this.deps.db, threadId)?.reasoningLevelOverride ?? commandReasoning(this.prompts(threadId).at(-1)?.input ?? "") ?? saved.reasoning;
   }
 
-  /** A full disk shows one card above the composer until space recovers. Free sandboxes also get the upgrade (ADR 0206). */
-  private diskStatus(threadId: string, saved: Binding) {
-    const disk = this.disk.get(threadId);
-    return disk ? { ...disk, upgrade: disk.reason === "disk_capacity" && Boolean(sandboxThread(saved.coreUrl)) && this.sandboxes.smallDisk() } : null;
-  }
-
   /** Records only say paused or not, so each one also reads the disk size for the card's meter. */
   private noteDisk(threadId: string, client: CloudroomClient, data: unknown): void {
     const record = z.object({ paused: z.boolean().optional(), reason: z.string().optional() }).catch({}).parse(data);
@@ -1204,7 +1198,7 @@ class CloudroomService {
     const serviceTier = input.service_tier === "fast" ? "fast" : "default";
     const initial = prompts.find(item => item.id === `first_${threadId}`);
     const issues = Object.values(this.connectionIssues.get(threadId) ?? {});
-    return { authRequired: !saved.sessionId && authRequiredMessages.has(saved.error ?? ""), starting: !saved.queuePaused && Boolean(initial && ["sending", "accepted"].includes(initial.state)), sessionId: saved.sessionId, paused: saved.queuePaused, failedStart: !saved.sessionId && initial?.state === "failed", model: saved.model, reasoning, serviceTier, error: saved.error ?? issues.find(issue => !issue.reconnecting)?.message ?? null, reconnecting: issues.some(issue => issue.reconnecting), usageLimit: Boolean(sandboxThread(saved.coreUrl)) && (this.sandboxes.usageLimited() || this.sandboxes.agentLimited(sandboxThread(saved.coreUrl) ?? "")), disk: this.diskStatus(threadId, saved), awake: !sandboxThread(saved.coreUrl) || this.sandboxes.isAwake(sandboxThread(saved.coreUrl) ?? ""), pendingDelivery: commands(this.deps.db, threadId).filter((c) => c.state === "sending").length };
+    return { authRequired: !saved.sessionId && authRequiredMessages.has(saved.error ?? ""), starting: !saved.queuePaused && Boolean(initial && ["sending", "accepted"].includes(initial.state)), sessionId: saved.sessionId, paused: saved.queuePaused, failedStart: !saved.sessionId && initial?.state === "failed", model: saved.model, reasoning, serviceTier, error: saved.error ?? issues.find(issue => !issue.reconnecting)?.message ?? null, reconnecting: issues.some(issue => issue.reconnecting), usageLimit: Boolean(sandboxThread(saved.coreUrl)) && (this.sandboxes.usageLimited() || this.sandboxes.agentLimited(sandboxThread(saved.coreUrl) ?? "")), disk: this.disk.get(threadId) ?? null, awake: !sandboxThread(saved.coreUrl) || this.sandboxes.isAwake(sandboxThread(saved.coreUrl) ?? ""), pendingDelivery: commands(this.deps.db, threadId).filter((c) => c.state === "sending").length };
   }
 
   async create(request: CreateThreadRequest, awaitingCore = false, fork?: { sourceThreadId: string; endSequence: number }): Promise<Thread> {

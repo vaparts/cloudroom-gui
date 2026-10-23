@@ -155,6 +155,24 @@ function ThreadSectionMoveMenu({
   );
 }
 
+export async function moveThreadToProject(
+  threadId: string,
+  project: { id: string; name: string },
+): Promise<boolean> {
+  try {
+    const result = await sdk.threads.move({ threadId, projectId: project.id });
+    appToast.success(
+      result.moved
+        ? `Moved to ${project.name}`
+        : `Moves to ${project.name} when this turn ends`,
+    );
+    return result.moved;
+  } catch (error) {
+    showMutationErrorToast({ error, fallbackMessage: "Could not move the thread" });
+    return false;
+  }
+}
+
 function ThreadProjectMoveMenu({
   drawerStep = false,
   isDrawer,
@@ -180,21 +198,6 @@ function ThreadProjectMoveMenu({
   ) {
     return null;
   }
-  const move = async (project: { id: string; name: string }) => {
-    try {
-      const result = await sdk.threads.move({
-        threadId: thread.id,
-        projectId: project.id,
-      });
-      appToast.success(
-        result.moved
-          ? `Moved to ${project.name}`
-          : `Moves to ${project.name} when this turn ends`,
-      );
-    } catch (error) {
-      showMutationErrorToast({ error, fallbackMessage: "Could not move the thread" });
-    }
-  };
   const Item = surface === "context" ? ContextMenuItem : DropdownMenuItem;
   return (
     <MoveSubmenu
@@ -206,7 +209,7 @@ function ThreadProjectMoveMenu({
       surface={surface}
     >
       {projects.map((project) => (
-        <Item key={project.id} onSelect={() => void move(project)}>
+        <Item key={project.id} onSelect={() => void moveThreadToProject(thread.id, project)}>
           <span className="min-w-0 flex-1 truncate">{project.name}</span>
         </Item>
       ))}

@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { fetchWithAppSurface } from "@/lib/app-surface";
 import { openUrlInExternalBrowser } from "@/lib/url-open-routing";
 
-export type UpgradePrompt = "limit_notice" | "disk_full" | "queue" | "queue_badge" | "plan_card" | "free_tip" | "auto_delete";
+export type UpgradePrompt = "limit_notice" | "queue" | "queue_badge" | "plan_card" | "free_tip" | "auto_delete";
 
 function report(where: UpgradePrompt, action: "viewed" | "clicked"): void {
   void fetchWithAppSurface("/api/v1/cloudroom/upgrade-prompt", {

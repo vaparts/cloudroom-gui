@@ -107,15 +107,14 @@ function expectCollapsedActivityAtSidebarEdge(label: string) {
 }
 
 describe("ProjectRow interactions", () => {
-  it("renders the destination gap as a muted copy of the dragged row", () => {
-    render(<DropPreviewRow depth={0} thread={makeThread()} />);
+  it("renders the destination as a line that takes no space", () => {
+    render(<DropPreviewRow depth={0} />);
 
     const preview = document.querySelector(
       '[data-sidebar-section-drop-preview="true"]',
     );
-    expect(preview?.textContent).toBe("Test thread");
-    expect(preview?.className).toContain("opacity-50");
-    expect(preview?.className).not.toContain("border-dashed");
+    expect(preview?.className).toContain("h-0");
+    expect(preview?.firstElementChild?.className).toContain("bg-sidebar-ring");
   });
 
   it("renders the dragged copy as a compact opaque chip", () => {

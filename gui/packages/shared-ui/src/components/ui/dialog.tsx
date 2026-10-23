@@ -205,6 +205,7 @@ type DialogContentProps = React.ComponentPropsWithoutRef<
 > & {
   onAfterCloseAutoFocus?: () => void;
   hideCloseButton?: boolean;
+  overlayClassName?: string;
 };
 
 const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
@@ -213,6 +214,7 @@ const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
       className,
       children,
       hideCloseButton = false,
+      overlayClassName,
       onAfterCloseAutoFocus,
       onCloseAutoFocus,
       ...props
@@ -251,7 +253,7 @@ const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
 
     return (
       <DialogPrimitive.Portal>
-        <DialogOverlay />
+        <DialogOverlay className={overlayClassName} />
         <DialogPrimitive.Content
           ref={ref}
           {...scopeProps}

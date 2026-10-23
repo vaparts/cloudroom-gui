@@ -485,7 +485,7 @@ export function installCloudroomRoutes(app: Hono, deps: AppDeps): void {
     if (["/tabs", "/read", "/unread", "/pin", "/unpin", "/pin-order"].includes(path)) return next();
     if (context.req.method === "POST" && ["/archive-all", "/unarchive"].includes(path)) return next();
     if (context.req.method === "DELETE" && path === "") return next();
-    if (context.req.method === "POST" && ["/send", "/queued-messages", "/stop", "/compact", "/edit-message"].includes(path)) return next();
+    if (context.req.method === "POST" && ["/send", "/queued-messages", "/stop", "/compact", "/edit-message", "/move"].includes(path)) return next();
     if (context.req.method === "PATCH" && /^\/queued-messages\/[^/]+(\/order)?$/.test(path)) return next();
     if (context.req.method === "DELETE" && /^\/queued-messages\/[^/]+$/.test(path)) return next();
     if (context.req.method === "POST" && /^\/interactions\/[^/]+\/(respond|cancel)$/.test(path)) return next();

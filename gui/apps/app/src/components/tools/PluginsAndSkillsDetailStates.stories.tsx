@@ -14,7 +14,6 @@ import { Switch } from "@cloudroom/shared-ui/switch";
 import { AddPluginDialog } from "@/components/plugin/management/AddPluginDialog";
 import { PluginDetailReleaseControl } from "@/components/plugin/management/PluginUpdatesCard";
 import { AutomationLifecycleControl } from "bb-plugin-automations/detail-view";
-import { AUTOMATION_CREATE_TEMPLATES } from "bb-plugin-automations/overview-view";
 import type { PluginCatalogSearchEntry } from "@/hooks/queries/plugin-catalog-queries";
 import { pluginSourceQueryKey } from "@/hooks/queries/query-keys";
 import {
@@ -49,6 +48,14 @@ export default {
 };
 
 const noop = () => {};
+const AUTOMATION_CREATE_TEMPLATES = [
+  {
+    label: "Security sweep",
+    icon: "SecurityCheck",
+    description: "reviews one area of the code for security holes",
+    prompt: "Create a new Cloudroom loop that reviews one area of the code for security holes.",
+  },
+] as const;
 
 function PluginStoryQueryBoundary({ children }: { children: ReactNode }) {
   const [queryClient] = useState(() => {

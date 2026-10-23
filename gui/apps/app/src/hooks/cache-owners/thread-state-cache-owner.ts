@@ -1,9 +1,14 @@
 import type { QueryClient } from "@tanstack/react-query";
-import type { ThreadListEntry, ThreadWithRuntime } from "@cloudroom/domain";
+import type {
+  ResolvedThreadExecutionOptions,
+  ThreadListEntry,
+  ThreadWithRuntime,
+} from "@cloudroom/domain";
 import type {
   ProjectResponse,
   ReorderPinnedThreadRequest,
   ThreadArchiveAllResponse,
+  UpdateThreadRequest,
 } from "@cloudroom/server-contract";
 import { applyNeighborReorder } from "@cloudroom/client-core";
 import {
@@ -38,6 +43,7 @@ import {
   type CachedThreadListSnapshot,
 } from "./thread-list-cache-data";
 import {
+  getCachedLiveThreadDescendants,
   getCachedLiveThreadIdsMatching,
   getCachedThreadSnapshots,
   optimisticallyArchiveThreads,
@@ -59,8 +65,14 @@ interface ThreadPinSuccessArgs extends ThreadRuntimeCacheArgs {
   pinSortKey: string | null;
 }
 
+export interface PinThreadPosition {
+  nextThreadId: string | null;
+  previousThreadId: string | null;
+}
+
 interface BeginThreadPinTransactionArgs extends ThreadIdCacheArgs {
   pinnedAt: number;
+  position?: PinThreadPosition;
 }
 
 interface BeginUnpinAndMoveThreadTransactionArgs extends ThreadIdCacheArgs {
@@ -271,6 +283,30 @@ export async function applyThreadUpdateResult({
   }
 }
 
+export function applyThreadReasoningResult({
+  queryClient,
+  thread,
+  request,
+}: ThreadRuntimeCacheArgs & {
+  request: Pick<UpdateThreadRequest, "model" | "reasoningLevel">;
+}): void {
+  queryClient.setQueryData<ThreadWithRuntime>(
+    threadQueryKey(thread.id),
+    thread,
+  );
+  queryClient.setQueryData<ResolvedThreadExecutionOptions | null>(
+    threadDefaultExecutionOptionsQueryKey(thread.id),
+    (options) =>
+      options && {
+        ...options,
+        ...(request.model ? { model: request.model } : {}),
+        ...(request.reasoningLevel
+          ? { reasoningLevel: request.reasoningLevel }
+          : {}),
+      },
+  );
+}
+
 interface OptimisticThreadFieldTransactionArgs extends ThreadIdCacheArgs {
   patch?: Partial<ThreadWithRuntime>;
   patchThread?: (thread: ThreadWithRuntime) => ThreadWithRuntime;
@@ -323,18 +359,31 @@ async function runOptimisticThreadFieldTransaction({
   };
 }
 
+function getOptimisticPinSortKey(
+  queryClient: QueryClient,
+  position: PinThreadPosition | undefined,
+): string | null {
+  if (!position) return null;
+  if (position.previousThreadId === null) return "";
+  const previousKey =
+    getCachedSidebarNavigationThreads(queryClient).find(
+      (thread) => thread.id === position.previousThreadId,
+    )?.pinSortKey ?? null;
+  return previousKey === null ? null : `${previousKey}\u0001`;
+}
+
 export function beginPinThreadTransaction({
   pinnedAt,
+  position,
   queryClient,
   threadId,
 }: BeginThreadPinTransactionArgs): Promise<ThreadListMutationTransaction> {
+  const pinSortKey = getOptimisticPinSortKey(queryClient, position);
   return runOptimisticThreadFieldTransaction({
     applyToLists: (queryClient, threadId) =>
       applyToCachedThreadListsAndSidebarNavigation(queryClient, (list) =>
         list.map((thread) =>
-          thread.id === threadId
-            ? { ...thread, pinnedAt, pinSortKey: null }
-            : thread,
+          thread.id === threadId ? { ...thread, pinnedAt, pinSortKey } : thread,
         ),
       ),
     patch: { pinnedAt },
@@ -663,9 +712,14 @@ export async function beginArchiveThreadAndChildrenTransaction({
 }: ArchiveThreadAndChildrenTransactionArgs): Promise<ArchiveThreadsTransaction> {
   await queryClient.cancelQueries({ queryKey: threadsQueryKey() });
   await queryClient.cancelQueries({ queryKey: sidebarNavigationQueryKey() });
+  const threadIds = new Set([
+    threadId,
+    ...getCachedLiveThreadDescendants(queryClient, threadId).map(
+      (thread) => thread.id,
+    ),
+  ]);
   return beginArchiveMatchingThreadsTransaction({
-    matchesThread: (thread) =>
-      thread.id === threadId || thread.parentThreadId === threadId,
+    matchesThread: (thread) => threadIds.has(thread.id),
     queryClient,
   });
 }

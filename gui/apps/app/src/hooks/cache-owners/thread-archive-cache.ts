@@ -60,6 +60,39 @@ export function getCachedLiveThreadIdsMatching({
   return Array.from(threadIds);
 }
 
+export function getCachedLiveThreadDescendants(
+  queryClient: QueryClient,
+  rootThreadId: string,
+): ThreadListEntry[] {
+  const childrenByParentId = new Map<string, Map<string, ThreadListEntry>>();
+  const addThread = (thread: ThreadListEntry) => {
+    if (thread.archivedAt !== null || thread.parentThreadId === null) return;
+    const children = childrenByParentId.get(thread.parentThreadId) ?? new Map();
+    children.set(thread.id, thread);
+    childrenByParentId.set(thread.parentThreadId, children);
+  };
+  for (const { data } of getCachedThreadLists(queryClient, {
+    queryKey: threadsQueryKey(),
+  })) {
+    for (const thread of iterateThreadListCacheEntries(data)) addThread(thread);
+  }
+  for (const thread of getCachedSidebarNavigationThreads(queryClient)) {
+    addThread(thread);
+  }
+  const descendants: ThreadListEntry[] = [];
+  const visited = new Set([rootThreadId]);
+  const pending = [rootThreadId];
+  for (let parentId = pending.pop(); parentId; parentId = pending.pop()) {
+    for (const child of childrenByParentId.get(parentId)?.values() ?? []) {
+      if (visited.has(child.id)) continue;
+      visited.add(child.id);
+      descendants.push(child);
+      pending.push(child.id);
+    }
+  }
+  return descendants;
+}
+
 export function getCachedThreadSnapshots({
   queryClient,
   threadIds,

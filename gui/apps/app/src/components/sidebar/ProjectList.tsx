@@ -91,6 +91,7 @@ import {
   CHRONOLOGICAL_CONTAINER_ID,
   compareByCreatedAtDescending,
   compareStandardThreads,
+  isThreadRunning,
   createSidebarProjectIdResolver,
   isSidebarProjectThread,
   NO_MACHINE_GROUP_KEY,
@@ -447,7 +448,7 @@ export function getSidebarThreadComparator(
     const comparison = base(left, right);
     if (
       normalizedSort === "updated" &&
-      (left.status === "active") !== (right.status === "active")
+      isThreadRunning(left) !== isThreadRunning(right)
     ) {
       return comparison;
     }
@@ -667,6 +668,7 @@ function useGroupedModeThreadDnd({
   order,
   onOrderChange,
   pinned,
+  projectMoves = false,
   rootItems,
   threads,
 }: {
@@ -677,6 +679,7 @@ function useGroupedModeThreadDnd({
   order: readonly SidebarSectionId[];
   onOrderChange: (order: SidebarSectionId[]) => void;
   pinned: GroupedModePinnedProps;
+  projectMoves?: boolean;
   rootItems: readonly ProjectThreadItem[];
   threads: readonly ThreadListEntry[];
 }) {
@@ -696,6 +699,7 @@ function useGroupedModeThreadDnd({
     onTopLevelSectionOrderChange: onOrderChange,
     onExpandThread: expandThread,
     groups: true,
+    projectMoves,
     pinnedReorderPending: pinned.pinnedReorderPending,
     pinnedThreads: pinned.pinnedThreads,
     pinnedRootNodes: pinned.pinnedRootNodes,
@@ -927,6 +931,7 @@ function ProjectModeSections({
       pinnedThreads,
       onReorderPinnedThread,
     },
+    projectMoves: true,
     rootItems: groupRootItems,
     threads: nonPinnedThreads,
   });

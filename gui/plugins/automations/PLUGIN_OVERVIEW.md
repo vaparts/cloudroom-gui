@@ -4,6 +4,7 @@ Loops run agents and scripts on a schedule, once or on a repeat, or when a webho
 
 - A Loops panel in the sidebar. Create, edit, pause, resume, and run loops there. Each loop shows its run history.
 - Review. One timeline of what your loops did on their own in the last 7 days, newest first, as a List or a Board. A thread the agent archived is Done; one it left open Needs you. Click "Looks good" to clear an item.
+- Templates. Ready-made loops in categories and priority groups (P0 to P4). Add one to any repos from its dropdown; the prompt, schedule, and agent are preset.
 - Three triggers. Use a cron expression with a timezone for repeating work, a date or a delay such as `2h` for one-shot work, or a webhook: a secret URL that runs the loop with each POST as data.
 - Agent mode. Pick the provider, model, reasoning level, and permission mode. Start a new thread, re-prompt an existing thread, or create a new worktree for each run.
 - Script mode. Store a bash, sh, node, or python3 script. Each run records stdout, stderr, and the exit code. A script that prints nothing is recorded as a silent tick.

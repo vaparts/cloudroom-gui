@@ -2,6 +2,33 @@
 
 Also on [cloudroom.dev/changelog](https://www.cloudroom.dev/changelog).
 
+## 118
+
+Cloud loop templates (2026-10-23)
+
+### Changes
+
+- Templates now make Cloud loops by default, with a Cloud | Local switch.
+- Local and Cloud loops now open the same loop dialog.
+- Loops added from a template keep the template's priority.
+- The loop dialog keeps your unsaved edits when new runs arrive.
+- Template cards are easier to read, and long repo paths no longer hide names.
+- Cloud agents now recognize when a command was killed for running out of memory.
+
+## 117
+
+Loop templates (2026-10-22)
+
+### Changes
+
+- A new Templates tab in Loops: ready-made loops you add to any of your repos in a few clicks.
+- Templates are sorted by category and by priority, from P1 Essential to P4 Niche.
+- The Loops Overview is now one list, grouped by priority, with turned-off loops at the bottom.
+- Click a Cloud loop to see and edit its details. Failed loops show a Failed tag.
+- Drag a thread onto another project in the sidebar to move it there.
+- Archiving, sending, pinning, and changing effort now feel instant.
+- Cloud threads run on the latest Core.
+
 ## 116
 
 Move threads between projects (2026-10-22)

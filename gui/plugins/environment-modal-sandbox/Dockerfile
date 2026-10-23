@@ -18,7 +18,7 @@ RUN apt-get update \
 
 # Package manager and coding agents. Versions match the supported BB providers.
 RUN npm install -g \
-        pnpm@9.15.0 \
+        pnpm@9.15.9 \
         @earendil-works/pi-coding-agent@1.0.0 \
         @openai/codex@0.153.4 \
         @anthropic-ai/claude-code@2.1.263 \

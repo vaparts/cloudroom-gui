@@ -126,7 +126,8 @@ function serializePluginRpcInput(value: unknown): string {
         }
       }
       for (const [key, child] of Object.entries(current)) {
-        assertJson(child, `${path}.${key}`);
+        // An optional field set to undefined is omitted, like JSON.stringify does.
+        if (child !== undefined) assertJson(child, `${path}.${key}`);
       }
     } finally {
       ancestors.delete(current);

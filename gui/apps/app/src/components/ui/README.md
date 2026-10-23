@@ -73,9 +73,9 @@ primitives and scenario-driven stories for stateful components. Mock data should
 be hand-written and stories must not rely on real network calls, real WebSocket
 connections, or real timers.
 
-The Ladle providers decorator seeds app state at the boundary. WebSocket state is
-seeded through the Jotai atoms that components already read rather than by
-monkey-patching the `useWebSocket` hook.
+The story provider in `.ladle/components.tsx` seeds app state at the boundary.
+WebSocket state is seeded through the Jotai atoms that components already read
+rather than by monkey-patching the `useWebSocket` hook.
 
 ## Story Coverage
 

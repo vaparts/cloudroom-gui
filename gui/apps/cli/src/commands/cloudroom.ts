@@ -1,6 +1,8 @@
 import { execFile, spawn } from "node:child_process";
-import { mkdir } from "node:fs/promises";
-import { basename, dirname } from "node:path";
+import { randomUUID } from "node:crypto";
+import { mkdir, mkdtemp, open, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { Command } from "commander";
 import type { AutoDeleteDays, CloudEnvironmentChange } from "@cloudroom/sdk";
@@ -35,6 +37,30 @@ async function runOnVm(url: string, target: VmTarget, command: string, stdin = B
   return Buffer.from(result.stdout, "hex");
 }
 
+// Under the app's 16 MiB stdin limit; the app splits each piece again for the sandbox proxy.
+const PUSH_PIECE = 12 * 1024 * 1024;
+
+/** Appends `file` to `remote` on the VM piece by piece, so big pushes never sit in memory (feedback #490).
+ *  Each piece first truncates to its offset, so a retry never duplicates data. */
+async function uploadFile(url: string, target: VmTarget, file: string, remote: string): Promise<void> {
+  const handle = await open(file);
+  try {
+    const { size } = await handle.stat();
+    for (let offset = 0; offset < size; offset += PUSH_PIECE) {
+      const length = Math.min(PUSH_PIECE, size - offset);
+      const { buffer, bytesRead } = await handle.read(Buffer.alloc(length), 0, length, offset);
+      const piece = buffer.subarray(0, bytesRead);
+      for (let attempt = 1; ; attempt++) {
+        try { await runOnVm(url, target, `mkdir -p ~/.cache/cloudroom && truncate -s ${offset} ${remote} && cat >> ${remote}`, piece); break; }
+        catch (error) { if (attempt === 3) throw error; }
+      }
+      if (size > PUSH_PIECE) process.stderr.write(`Sent ${Math.round((offset + bytesRead) / 2 ** 20)} of ${Math.round(size / 2 ** 20)} MiB\n`);
+    }
+  } finally {
+    await handle.close();
+  }
+}
+
 export function registerVmCommands(program: Command, getUrl: () => string): void {
   const vm = program.command("vm").description("Run commands and copy files on your cloud VM or a Cloud thread's sandbox, as its agent account");
   vm.command("run <command>").description("Run a shell command on the VM or sandbox (quote it). Exits with its code.")
@@ -64,9 +90,19 @@ export function registerVmCommands(program: Command, getUrl: () => string): void
   vm.command("push <local-path> [vm-folder]").description("Copy a file or folder from this Mac to the VM or sandbox (default: agent home)")
     .option(...THREAD_OPTION)
     .action(action(async (source: string, target = "~", options: VmTarget = {}) => {
-      const { stdout } = await promisify(execFile)("tar", ["--no-xattrs", "-czf", "-", "-C", dirname(source), "--", basename(source)],
-        { encoding: "buffer", maxBuffer: 16 * 1024 * 1024, env: { ...process.env, COPYFILE_DISABLE: "1" } });
-      await runOnVm(getUrl(), options, `d=${quote(target)}; mkdir -p -- "$d" && tar -xzf - -C "$d"`, stdout);
+      const local = await mkdtemp(join(tmpdir(), "room-push-"));
+      const archive = join(local, "push.tgz");
+      const remote = `~/.cache/cloudroom/push-${randomUUID()}.tgz`;
+      try {
+        await promisify(execFile)("tar", ["--no-xattrs", "-czf", archive, "-C", dirname(source), "--", basename(source)], { env: { ...process.env, COPYFILE_DISABLE: "1" } });
+        await uploadFile(getUrl(), options, archive, remote);
+        await runOnVm(getUrl(), options, `f=${remote}; d=${quote(target)}; mkdir -p -- "$d" && tar -xzf "$f" -C "$d"; s=$?; rm -f -- "$f"; exit $s`);
+      } catch (error) {
+        await runOnVm(getUrl(), options, `rm -f -- ${remote}`).catch(() => {});
+        throw error;
+      } finally {
+        await rm(local, { recursive: true, force: true });
+      }
       console.log(JSON.stringify({ copied: source, to: target }));
     }));
 }
@@ -215,11 +251,13 @@ export function registerCloudCommands(program: Command, getUrl: () => string): v
     const script = await piped("setup script");
     await change({ action: "setup", setup: script }, options, script.trim() ? "Saved. New cloud sandboxes run it once." : "Setup script cleared.");
   }));
-  group.command("auto-delete [days]").description("Show or set how long unused cloud threads are kept: 30, 90, 180, 365, or never").option("--json", "Print JSON").action(action(async (days: string | undefined, options: JsonOutputOptions) => {
+  group.command("auto-delete [days]").description("Show or set how long unused cloud threads are kept: 30, 90, 180, 365, or never (as long as your plan allows)").option("--json", "Print JSON").action(action(async (days: string | undefined, options: JsonOutputOptions) => {
     const sdk = createCliBbSdk(getUrl()).cloudroom;
     if (days !== undefined && !AUTO_DELETE_CHOICES.includes(days)) throw new Error(`Pick one of: ${AUTO_DELETE_CHOICES.join(", ")}.`);
     const result = days === undefined ? await sdk.autoDelete() : await sdk.setAutoDelete(days === "never" ? null : Number(days) as AutoDeleteDays);
-    if (!outputJson(options, result)) console.log(result.days === null ? "Unused cloud threads are kept forever." : `Unused cloud threads are deleted after ${result.days} days.`);
+    const kept = result.kept ?? result.days;
+    const limit = result.plan && kept === result.plan.days ? `${result.plan.label} (${result.plan.name} limit)` : `${kept} days`;
+    if (!outputJson(options, result)) console.log(kept === null ? "Unused cloud threads are kept forever." : `Unused cloud threads are deleted after ${limit}.`);
   }));
   group.command("sign-in").option("--project <id>", "Legacy prepared-project binding (optional)")
     .option("--website-url <url>", "Loopback website for local development")

@@ -8,14 +8,3 @@
 @source "../../../plugins/automations";
 @source "../../../plugins/provider-retry";
 @source "../../../plugins/provider-usage";
-
-.ladle-main {
-  padding: 0;
-}
-
-:root,
-.dark {
-  --ladle-bg-color-primary: var(--background);
-  --ladle-bg-color-secondary: var(--sidebar);
-  --ladle-color-primary: var(--foreground);
-}

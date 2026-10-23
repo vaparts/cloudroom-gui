@@ -637,7 +637,11 @@ function applyOptimisticAcceptedTurnThreadState({
   queryClient: QueryClient;
   threadId: string;
 }): void {
-  updateCachedThread(queryClient, threadId, (thread) => ({
+  const accept = <
+    T extends Pick<ThreadListEntry, "runtime" | "status" | "updatedAt">,
+  >(
+    thread: T,
+  ): T => ({
     ...thread,
     status: "active",
     updatedAt: Math.max(thread.updatedAt, createdAt),
@@ -649,7 +653,11 @@ function applyOptimisticAcceptedTurnThreadState({
           ? thread.runtime.displayStatus
           : "active",
     },
-  }));
+  });
+  updateCachedThread(queryClient, threadId, accept);
+  applyToCachedThreadListsAndSidebarNavigation(queryClient, (list) =>
+    list.map((thread) => (thread.id === threadId ? accept(thread) : thread)),
+  );
 }
 
 function removeOptimisticTimelineRowIfPresent(
@@ -927,6 +935,7 @@ export function rollbackSendThreadMessageTransaction({
     queryClient,
     threadId: request.id,
   });
+  invalidateThreadListMembershipQueries({ queryClient, threadId: request.id });
 }
 
 export function applySendThreadMessageSuccess({
@@ -962,6 +971,10 @@ export function applySendThreadMessageSuccess({
         optimisticThreadDataUpdateCount:
           transaction.optimisticThreadDataUpdateCount,
         previousThread: transaction.previousThread,
+        queryClient,
+        threadId: request.id,
+      });
+      invalidateThreadListMembershipQueries({
         queryClient,
         threadId: request.id,
       });

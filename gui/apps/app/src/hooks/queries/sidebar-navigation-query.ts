@@ -65,6 +65,16 @@ export function useProjectDisplayName(
   return data.projects.find((project) => project.id === projectId)?.name;
 }
 
+export function useSidebarProjects(): SidebarBootstrapResponse["projects"] {
+  const { data } = useQuery<SidebarBootstrapResponse>({
+    queryKey: sidebarNavigationQueryKey(),
+    queryFn: ({ signal }) => fetchSidebarNavigation(signal),
+    ...REALTIME_OWNED_STATIC_CACHE_QUERY_POLICY,
+    enabled: false,
+  });
+  return data?.projects ?? [];
+}
+
 interface SidebarNavigationThreadSelection<T> {
   data: T | undefined;
   isBootstrapPending: boolean;

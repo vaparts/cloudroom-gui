@@ -205,9 +205,62 @@ export function buildAcpModelListParams(
   };
 }
 
+type AcpModelOptions = Pick<
+  AcpSessionExecutionOptions,
+  "model" | "reasoningLevel" | "serviceTier"
+>;
+
+function buildAcpModelParams(
+  launchSpec: AcpLaunchSpec,
+  options: AcpModelOptions,
+  parameterizedModelPicker: boolean,
+  dialectId: string | undefined,
+): Pick<AcpSessionParams, "modelSelection" | "launchReasoningLevel"> {
+  return {
+    ...buildAcpModelSelectionParam(
+      launchSpec,
+      options,
+      parameterizedModelPicker,
+      dialectId,
+    ),
+    ...(launchSpec.reasoningCli !== undefined &&
+    options.reasoningLevel !== undefined
+      ? { launchReasoningLevel: options.reasoningLevel }
+      : {}),
+  };
+}
+
+export function applyAcpTurnSettings(
+  construction: AcpSessionParams,
+  launchSpec: AcpLaunchSpec | null,
+  options: AcpModelOptions & Pick<AcpSessionExecutionOptions, "envVars">,
+): AcpSessionParams {
+  let next = construction;
+  if (launchSpec !== null && options.model !== undefined) {
+    const {
+      modelSelection: _modelSelection,
+      launchReasoningLevel: _launchReasoningLevel,
+      ...rest
+    } = construction;
+    next = {
+      ...rest,
+      ...buildAcpModelParams(
+        launchSpec,
+        options,
+        construction.parameterizedModelPicker,
+        construction.dialectId,
+      ),
+    };
+  }
+  if (Object.keys(options.envVars ?? {}).length > 0) {
+    next = { ...next, envVars: { ...launchSpec?.env, ...options.envVars } };
+  }
+  return next;
+}
+
 function buildAcpModelSelectionParam(
   launchSpec: AcpLaunchSpec,
-  options: AcpSessionExecutionOptions,
+  options: AcpModelOptions,
   parameterizedModelPicker: boolean,
   dialectId: string | undefined,
 ): { modelSelection?: AcpModelSelection } {
@@ -289,7 +342,7 @@ export function buildAcpSessionParams(
       args: [...launchSpec.args],
     },
     ...(args.dialectId === undefined ? {} : { dialectId: args.dialectId }),
-    ...buildAcpModelSelectionParam(
+    ...buildAcpModelParams(
       launchSpec,
       options,
       args.parameterizedModelPicker,
@@ -304,10 +357,6 @@ export function buildAcpSessionParams(
       : {}),
     ...(launchSpec.permissionCli !== undefined
       ? { permissionCli: launchSpec.permissionCli }
-      : {}),
-    ...(launchSpec.reasoningCli !== undefined &&
-    options.reasoningLevel !== undefined
-      ? { launchReasoningLevel: options.reasoningLevel }
       : {}),
     permissionMode: options.permissionMode,
     workspaceWriteRoots: [cwd, ...args.additionalWorkspaceWriteRoots],

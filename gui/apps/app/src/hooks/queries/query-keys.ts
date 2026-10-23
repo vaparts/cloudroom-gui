@@ -720,6 +720,10 @@ export function allThreadQueryKeyPrefix(): ThreadQueryKeyPrefix {
   return [THREAD_QUERY_KEY];
 }
 
+export function threadReasoningSaveKey(threadId: string) {
+  return ["thread-reasoning", threadId];
+}
+
 export function threadDefaultExecutionOptionsQueryKey(
   threadId: string,
 ): ThreadDefaultExecutionOptionsQueryKey {

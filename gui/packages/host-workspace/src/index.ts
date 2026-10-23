@@ -13,6 +13,7 @@ export {
   fetchRemoteBranches,
   getCheckoutRef,
   getWorkspaceGitOperation,
+  readWorkspaceGitState,
   getGitCommonDir,
   hasUncommittedChanges,
   listBranchRefsWithDefaults,

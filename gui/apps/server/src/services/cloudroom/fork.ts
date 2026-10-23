@@ -334,11 +334,12 @@ function codeScript(workspace: string, id: string, thin: boolean): string {
   ].join("\n");
 }
 
-async function uploadCode(client: CloudroomClient, file: string, data: Buffer): Promise<void> {
+/** Writes `data` to `~/file` in `UPLOAD_PART` pieces, since sandbox proxies drop requests over about 8 MB. */
+export async function uploadInParts(client: CloudroomClient, file: string, data: Buffer, signal?: AbortSignal): Promise<void> {
   for (let offset = 0; offset < data.length; offset += UPLOAD_PART) {
     const part = new Uint8Array(data.subarray(offset, offset + UPLOAD_PART));
-    const result = await client.runOnVm({ command: `mkdir -p ~/.cache/cloudroom && truncate -s ${offset} ~/${file} && cat >> ~/${file}` }, undefined, part);
-    if (result.code !== 0) throw new Error(Buffer.from(result.stderr, "hex").toString().trim() || "The code upload failed.");
+    const result = await client.runOnVm({ command: `mkdir -p ~/.cache/cloudroom && truncate -s ${offset} ~/${file} && cat >> ~/${file}` }, signal, part);
+    if (result.code !== 0) throw new Error(Buffer.from(result.stderr, "hex").toString().trim() || "The upload failed.");
   }
 }
 
@@ -361,7 +362,7 @@ export async function landForkCode(client: CloudroomClient, started: { sessionId
 async function applyForkCode(client: CloudroomClient, workspace: string, id: string, code: Code): Promise<void> {
   const files = isFiles(code.data);
   const file = `.cache/cloudroom/${id}.${files ? "tgz" : "bundle"}`;
-  await uploadCode(client, file, code.data);
+  await uploadInParts(client, file, code.data);
   if (files) {
     const skipped = [...SKIPPED, ".cloudroom"].map(quote).join(" ");
     await vm(client, `mkdir -p ${quote(workspace)} && cd ${quote(workspace)} && python3 -I -c ${quote(PRUNE)} . ~/${file} ${skipped} && tar -xzf ~/${file}; code=$?; rm -f ~/${file}; exit $code`);
@@ -384,7 +385,7 @@ async function applyForkCode(client: CloudroomClient, workspace: string, id: str
   });
   let result = await land();
   if (result.code === MISSING_HISTORY && code.full) {
-    await uploadCode(client, file, await code.full());
+    await uploadInParts(client, file, await code.full());
     result = await land();
   }
   if (result.code !== 0 || result.truncated)

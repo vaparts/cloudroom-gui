@@ -85,6 +85,7 @@ import {
   resolveAcpPermissionDecision,
 } from "../interactions.js";
 import {
+  applyAcpTurnSettings,
   buildAcpModelListParams,
   buildAcpSessionParams,
   type AcpAgentCommandParam,
@@ -2819,26 +2820,25 @@ async function handleRequest(
         sendError(request.id, -32000, "A turn is already active");
         return;
       }
-      if (Object.keys(params.options.envVars ?? {}).length > 0) {
-        const envVars = {
-          ...(decodeLaunchSpec(params.options.providerOptions)?.env ?? {}),
-          ...params.options.envVars,
-        };
-        if (!isDeepStrictEqual(envVars, session.construction.envVars ?? {})) {
-          const previousProviderThreadId = session.providerThreadId;
-          session = await startAgentSession({
-            kind: "resume",
-            params: { ...session.construction, envVars },
-            resumeProviderThreadId: previousProviderThreadId,
-          });
-          sendNotification(BRIDGE_NOTIFICATION_METHODS.sessionReplaced, {
-            threadId: params.threadId,
-            providerThreadId: session.providerThreadId,
-            reason:
-              "Execution settings changed; the ACP session was rebuilt to apply them.",
-            contextLost: session.providerThreadId !== previousProviderThreadId,
-          });
-        }
+      const construction = applyAcpTurnSettings(
+        session.construction,
+        decodeLaunchSpec(params.options.providerOptions),
+        params.options,
+      );
+      if (!isDeepStrictEqual(construction, session.construction)) {
+        const previousProviderThreadId = session.providerThreadId;
+        session = await startAgentSession({
+          kind: "resume",
+          params: construction,
+          resumeProviderThreadId: previousProviderThreadId,
+        });
+        sendNotification(BRIDGE_NOTIFICATION_METHODS.sessionReplaced, {
+          threadId: params.threadId,
+          providerThreadId: session.providerThreadId,
+          reason:
+            "Execution settings changed; the ACP session was rebuilt to apply them.",
+          contextLost: session.providerThreadId !== previousProviderThreadId,
+        });
       }
       const pending: AcpPendingTurnInput = {
         clientRequestId: params.clientRequestId,

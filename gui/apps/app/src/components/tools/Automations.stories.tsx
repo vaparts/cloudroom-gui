@@ -1,6 +1,4 @@
-import { useState } from "react";
 import {
-  AgentAutomationDefinition,
   AutomationScriptContent,
   ScriptAutomationDefinition,
   RunRow,
@@ -12,13 +10,11 @@ import {
 import type { CloudAutomation } from "bb-plugin-automations/cloud-view";
 import type {
   AutomationResponse,
-  AgentEnvironment,
   AutomationRunResponse,
   AutomationsOverviewResponse,
 } from "bb-plugin-automations/rpc-types";
 import { ResourceListState } from "@cloudroom/shared-ui/resource-list";
 import { StoryCard, StoryRow } from "../../../.ladle/story-card";
-import { ModelPickerStoryQueryProvider } from "../../../.ladle/model-picker-query-provider";
 
 export default { title: "Automations" };
 
@@ -247,51 +243,6 @@ function runsFor(
   });
 }
 
-function PromptVariant({
-  value,
-  editable = false,
-  projectLabel,
-}: {
-  value: AutomationResponse;
-  editable?: boolean;
-  projectLabel?: string;
-}) {
-  const [execution, setExecution] = useState(value.execution);
-  const [editing, setEditing] = useState(editable);
-  if (execution.mode !== "agent") return null;
-  return (
-    <ModelPickerStoryQueryProvider
-      environmentId={
-        execution.environment.type === "reuse"
-          ? execution.environment.environmentId
-          : null
-      }
-    >
-      <div className="w-full max-w-2xl">
-        <AgentAutomationDefinition
-          execution={execution}
-          editing={editing}
-          personalProject={value.projectId === "proj_personal"}
-          projectContextLabel={
-            projectLabel ??
-            (value.projectId === "proj_personal" ? "Personal" : "bb")
-          }
-          pending={false}
-          onCancel={() => setEditing(false)}
-          onUpdate={async (update) => {
-            setExecution({
-              ...execution,
-              ...update,
-              serviceTier: update.serviceTier ?? undefined,
-            });
-            setEditing(false);
-          }}
-        />
-      </div>
-    </ModelPickerStoryQueryProvider>
-  );
-}
-
 export function OverviewRows() {
   const descriptions: Record<string, { label: string; hint: string }> = {
     "ci-triage": {
@@ -420,126 +371,9 @@ export function OverviewStates() {
   );
 }
 
-function environmentVariant(
-  environment: AgentEnvironment,
-  targetThreadId?: string,
-): AutomationResponse {
-  const value = PROJECT_AUTOMATION;
-  if (value.execution.mode !== "agent") return value;
-  return {
-    ...value,
-    execution: {
-      ...value.execution,
-      environment,
-      ...(targetThreadId === undefined ? {} : { targetThreadId }),
-    },
-  };
-}
-
 export function DetailStates() {
   return (
     <StoryCard>
-      <StoryRow
-        label="Personal workspace prompt"
-        hint="Read-only prompt using a personal workspace. The footer shows its configured workspace and permissions."
-      >
-        <PromptVariant value={DETAIL_AUTOMATION} />
-      </StoryRow>
-      <StoryRow
-        label="Project checkout prompt"
-        hint="Read-only prompt in a project. The footer includes the project name and configured checkout path."
-      >
-        <PromptVariant value={PROJECT_AUTOMATION} />
-      </StoryRow>
-      <StoryRow
-        label="Reuse an environment"
-        hint="An existing environment ID is configured. Shows Reuse environment with the same open-folder icon as core’s reuse selector."
-      >
-        <PromptVariant
-          value={environmentVariant({
-            type: "reuse",
-            environmentId: "env_story_reuse",
-          })}
-        />
-      </StoryRow>
-      <StoryRow
-        label="Create a new worktree"
-        hint="Creates a managed worktree from the default branch. Shows New worktree metadata."
-      >
-        <PromptVariant
-          value={environmentVariant({
-            type: "host",
-            workspace: {
-              type: "managed-worktree",
-              baseBranch: { kind: "default" },
-            },
-          })}
-        />
-      </StoryRow>
-      <StoryRow
-        label="Use project defaults"
-        hint="No explicit workspace is configured. Shows Project default metadata."
-      >
-        <PromptVariant
-          value={environmentVariant({ type: "project-default" })}
-        />
-      </StoryRow>
-      <StoryRow
-        label="Send to an existing thread"
-        hint="The target thread takes precedence over the fallback environment. Shows Existing thread metadata."
-      >
-        <PromptVariant
-          value={environmentVariant(
-            { type: "project-default" },
-            "thr_story_existing",
-          )}
-        />
-      </StoryRow>
-      <StoryRow
-        label="Checkout without a path"
-        hint="An unmanaged workspace with no configured path. Shows the Workspace fallback label."
-      >
-        <PromptVariant
-          value={environmentVariant({
-            type: "host",
-            workspace: { type: "unmanaged", path: null },
-          })}
-        />
-      </StoryRow>
-      <StoryRow
-        label="Long project and path"
-        hint="Exercises truncation when both the project name and checkout path are long."
-      >
-        <PromptVariant
-          projectLabel="Infrastructure and release engineering"
-          value={environmentVariant({
-            type: "host",
-            workspace: {
-              type: "unmanaged",
-              path: "/Users/you/Code/infrastructure-and-release-engineering/services/deployment-orchestrator",
-            },
-          })}
-        />
-      </StoryRow>
-      <StoryRow
-        label="Narrow prompt box"
-        hint="A 320px-wide reused-environment prompt. Exercises compact labels and permission-control sizing."
-      >
-        <div className="w-80 max-w-full">
-          <PromptVariant
-            value={environmentVariant({
-              type: "reuse",
-              environmentId: "env_story_reuse",
-            })}
-          />
-        </div>
-      </StoryRow>
-      <StoryRow
-        label="editing prompt"
-        hint="Change the prompt, model, or permission; Save and Cancel update this example."
-      >
-        <PromptVariant value={PROJECT_AUTOMATION} editable />
-      </StoryRow>
       <StoryRow
         label="Short script"
         hint="A script that fits without scrolling or a bottom fade."
@@ -627,7 +461,7 @@ export const CloudAutomations = () => (
         automation={automation}
         providers={[]}
         now={now}
-        actions={{ onOpen: noop, onRun: noop, onDelete: noop, onEnabledChange: noop, onNewUrl: noop }}
+        actions={{ onOpen: noop, onRun: noop, onDelete: noop, onEnabledChange: noop, onNewUrl: noop, onSave: async () => true }}
       />
     ))}
   </StoryCard>

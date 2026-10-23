@@ -4,8 +4,8 @@
 @layer base {
   /*
    * Keep the real app shell from becoming a second scroll container. These
-   * selectors are class-scoped because Ladle imports app.css but does not use
-   * the Vite index.html shell classes.
+   * selectors are class-scoped because the story viewer imports app.css but
+   * does not use the Vite index.html shell classes.
    *
    * Use the dynamic viewport height in browser tabs so native/in-app browser
    * chrome cannot leave the percentage-height containing block taller than

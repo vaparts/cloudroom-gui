@@ -2,7 +2,6 @@ import type { Dirent } from "node:fs";
 import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import matter from "gray-matter";
 import type {
   DiscoveredSkill,
   HostCommandOrigin,
@@ -11,10 +10,12 @@ import type {
   SkillRootKind,
 } from "@cloudroom/host-daemon-contract";
 import { isPathWithinDirectory } from "@cloudroom/process-utils";
+import { parse as parseYaml } from "yaml";
 
 export const SKILL_FILE_NAME = "SKILL.md";
 const MARKDOWN_FILE_EXTENSION = ".md";
 const FRONTMATTER_DELIMITER = "---";
+const FRONTMATTER_PATTERN = /^\uFEFF?---([\s\S]*?)(?:\r?\n---|$)/u;
 
 const MAX_SCAN_DEPTH = 24;
 const MAX_SCAN_ENTRY_COUNT = 1_000;
@@ -124,6 +125,14 @@ function hasSupportedFrontmatterDelimiter(content: string): boolean {
   );
 }
 
+function parseFrontmatterData(content: string): Record<string, unknown> {
+  const yaml = FRONTMATTER_PATTERN.exec(content)?.[1];
+  const data: unknown = yaml === undefined ? {} : parseYaml(yaml);
+  return typeof data === "object" && data !== null
+    ? (data as Record<string, unknown>)
+    : {};
+}
+
 function readFrontmatterString(
   data: Record<string, unknown>,
   key: string,
@@ -150,7 +159,7 @@ async function parseFrontmatter(filePath: string): Promise<ParsedFrontmatter> {
 
   let data: Record<string, unknown>;
   try {
-    data = matter(content).data;
+    data = parseFrontmatterData(content);
   } catch {
     return { name: null, description: null, argumentHint: null };
   }

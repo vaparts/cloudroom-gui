@@ -123,7 +123,7 @@ describe("MarkdownPreview prompt mentions", () => {
     expect(screen.getByText("deploy")).toBeTruthy();
   });
 
-  it("turns a single newline into a hard break (remark-breaks)", () => {
+  it("turns a single newline into a hard break", () => {
     const { container } = renderMarkdown(
       <MarkdownPreview
         content={"first line\nsecond line"}

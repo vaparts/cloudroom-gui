@@ -48,10 +48,9 @@ export function CloudUsageLimitNotice() {
 
 const gb = (bytes: number) => Number((bytes / 1e9).toFixed(1));
 
-/** A full cloud disk: one live card instead of a chat row per pause and resume. Free sandboxes also get the upgrade (ADR 0206). */
+/** A full cloud disk: one live card instead of a chat row per pause and resume. No upgrade: every plan has the same disk (ADR 0282). */
 export function CloudDiskNotice({ disk }: { disk: CloudDisk }) {
   const [open, setOpen] = useState(false);
-  useUpgradePromptViewed(disk.upgrade ? "disk_full" : null);
   const measured = disk.reason === "disk_capacity";
   const total = measured && disk.usedBytes !== null && disk.totalBytes ? disk.totalBytes : null;
   return (
@@ -71,12 +70,10 @@ export function CloudDiskNotice({ disk }: { disk: CloudDisk }) {
           )}
           <PromptStackCardChevron isExpanded={open} className={cn("text-muted-foreground", total === null && "ml-auto")} />
         </button>
-        {disk.upgrade && <Button type="button" size="sm" className="mr-2 h-6 px-2" onClick={() => openUpgrade("disk_full")}>Upgrade</Button>}
       </div>
       {open && (
         <p className="px-3 pb-2.5 text-muted-foreground">
           {measured ? "Cloudroom stops the command filling the disk within 30 seconds, then work resumes. Then ask the agent to delete what it no longer needs, like build output, caches, or node_modules." : "Your files and history are kept. Work resumes once the disk can be checked again."}
-          {disk.upgrade && " Free sandboxes have 10 GB. Pro and Ultra get 20 GB and twice the CPU and memory for every new thread."}
         </p>
       )}
     </PromptStackCard>

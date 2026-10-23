@@ -5,7 +5,7 @@
   "description": "macOS and Linux Electron shell for Cloudroom",
   "main": "dist/main.js",
   "desktopName": "cloudroom-dev.desktop",
-  "packageManager": "pnpm@9.15.0",
+  "packageManager": "pnpm@9.15.9",
   "os": [
     "darwin",
     "linux"

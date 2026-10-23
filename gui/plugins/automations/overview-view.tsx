@@ -24,7 +24,6 @@ import { DelayedLoading } from "@cloudroom/shared-ui/delayed-loading";
 import { COARSE_POINTER_ICON_SIZE_SHRINK_CLASS } from "@cloudroom/shared-ui/coarse-pointer-sizing";
 import {
   ResourceActionButton,
-  ResourceBrowseGrid,
   ResourceCollectionPage,
   ResourceCollectionViewport,
   ResourceListState,
@@ -32,7 +31,6 @@ import {
   ResourceMeta,
   ResourceRow,
   ResourceSortMenu,
-  ResourceTemplateBrowseCard,
 } from "@cloudroom/shared-ui/resource-list";
 import { Input } from "@cloudroom/shared-ui/input";
 import { cn } from "@cloudroom/shared-ui/lib/utils";
@@ -58,7 +56,14 @@ import {
   PERSONAL_PROJECT_ID,
 } from "./lib/format-schedule.js";
 import { AutomationMetadataItem } from "./metadata.js";
+import {
+  LoopTemplatesView,
+  type LoopTemplatesState,
+  LOOP_PRIORITY_STYLE,
+  LoopGroupDivider,
+} from "./templates-view.js";
 import type { CloudAutomation, CloudAutomationActions } from "./cloud-view.js";
+import { CloudLoopDialog } from "./loop-dialog.js";
 import {
   LoopReviewView,
   reviewableItems,
@@ -66,6 +71,8 @@ import {
   type ReviewFilter,
   type ReviewLayout,
 } from "./review-view.js";
+
+const OVERVIEW_BAND_CLASSES = "mx-auto w-full max-w-3xl";
 
 const AUTOMATION_STATUS_FILTER_OPTIONS = [
   { id: "active", label: "Active" },
@@ -102,43 +109,13 @@ const NEW_LOOP_OPTIONS = [
     divider: true,
   },
 ] as const;
-export const AUTOMATION_CREATE_TEMPLATES = [
-  {
-    label: "CI failure triage",
-    icon: "AlertCircle",
-    description:
-      "runs every weekday morning, checks failed main-branch CI, and opens fixer threads only for new failures",
-    prompt: `${CREATE_AUTOMATION_PROMPT}runs every weekday morning, checks failed main-branch CI, and opens fixer threads only for new failures.`,
-  },
-  {
-    label: "Dependency drift",
-    icon: "ElectricPlugs",
-    description:
-      "checks weekly for stale dependencies and opens an update thread when risk is low",
-    prompt: `${CREATE_AUTOMATION_PROMPT}checks weekly for stale dependencies and opens an update thread when risk is low.`,
-  },
-  {
-    label: "Release readiness",
-    icon: "Target",
-    description:
-      "checks the release branch hourly, summarizes blocking checks, and alerts only when the status changes",
-    prompt: `${CREATE_AUTOMATION_PROMPT}checks the release branch hourly, summarizes blocking checks, and alerts only when the status changes.`,
-  },
-  {
-    label: "Stale worktrees",
-    icon: "FolderGit",
-    description:
-      "checks daily for stale worktrees and opens cleanup threads only after they exceed the team's retention window",
-    prompt: `${CREATE_AUTOMATION_PROMPT}checks daily for stale worktrees and opens cleanup threads only after they exceed the team's retention window.`,
-  },
-] as const;
 
 type OverviewEntry = AutomationsOverviewResponse["automations"][number];
 type AutomationProjectFilter = `project:${string}`;
 type AutomationSortMode = "next" | "project" | "alpha";
 type ProviderList = PluginProvidersState["providers"];
 type AutomationSortDirection = "asc" | "desc";
-export type AutomationCollectionMode = "installed" | "review" | "browse";
+export type AutomationCollectionMode = "installed" | "review" | "templates";
 
 export interface LoopReviewState {
   data: ReviewResponse | null;
@@ -172,6 +149,116 @@ const LAST_RUN_DOT = {
   failed: { label: "Last run failed", className: "bg-destructive" },
   running: { label: "Running", className: "animate-pulse bg-primary" },
 } as const;
+
+const LOOP_PRIORITIES = [1, 2, 3, 4] as const;
+type LoopPriority = (typeof LOOP_PRIORITIES)[number];
+const DEFAULT_LOOP_PRIORITY: LoopPriority = 3;
+const LOOP_PRIORITY_STORAGE_KEY = "cloudroom-loops:priorities";
+
+function isLoopPriority(value: unknown): value is LoopPriority {
+  return LOOP_PRIORITIES.includes(value as LoopPriority);
+}
+
+function readLoopPriorities(): Record<string, LoopPriority> {
+  try {
+    const parsed: unknown = JSON.parse(
+      window.localStorage.getItem(LOOP_PRIORITY_STORAGE_KEY) ?? "{}",
+    );
+    if (parsed === null || typeof parsed !== "object") return {};
+    return Object.fromEntries(
+      Object.entries(parsed).filter(([, value]) => isLoopPriority(value)),
+    ) as Record<string, LoopPriority>;
+  } catch {
+    return {};
+  }
+}
+
+function saveLoopPriority(
+  key: string,
+  priority: LoopPriority,
+): Record<string, LoopPriority> {
+  const next = { ...readLoopPriorities(), [key]: priority };
+  try {
+    window.localStorage.setItem(
+      LOOP_PRIORITY_STORAGE_KEY,
+      JSON.stringify(next),
+    );
+  } catch {
+    return next;
+  }
+  return next;
+}
+
+function useLoopPriorities() {
+  const [priorities, setPriorities] = useState(readLoopPriorities);
+  useEffect(() => {
+    const sync = (event: StorageEvent) => {
+      if (event.key === LOOP_PRIORITY_STORAGE_KEY) {
+        setPriorities(readLoopPriorities());
+      }
+    };
+    window.addEventListener("storage", sync);
+    return () => window.removeEventListener("storage", sync);
+  }, []);
+  const setPriority = useCallback((key: string, priority: LoopPriority) => {
+    setPriorities(saveLoopPriority(key, priority));
+  }, []);
+  return { priorities, setPriority };
+}
+
+function LoopPriorityMenu({
+  priority,
+  name,
+  onChange,
+}: {
+  priority: LoopPriority;
+  name: string;
+  onChange: (priority: LoopPriority) => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          data-row-action
+          aria-label={`Priority ${priority} for ${name}. Change priority`}
+          className="flex size-6 cursor-pointer items-center justify-center rounded-full hover:bg-state-hover"
+        >
+          <span
+            className={cn(
+              "size-4 rounded-full border-2",
+              LOOP_PRIORITY_STYLE[priority].ring,
+            )}
+          />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="start"
+        className="w-40"
+        onClick={(event) => event.stopPropagation()}
+      >
+        {LOOP_PRIORITIES.map((level) => (
+          <DropdownMenuItem
+            key={level}
+            className="gap-2"
+            onSelect={() => onChange(level)}
+          >
+            <span
+              className={cn(
+                "size-3.5 rounded-full border-2",
+                LOOP_PRIORITY_STYLE[level].ring,
+              )}
+            />
+            Priority {level}
+            {level === priority ? (
+              <Icon name="Check" className="ml-auto size-3.5" aria-hidden />
+            ) : null}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 function AutomationStatusDot({
   status,
@@ -224,9 +311,12 @@ function automationAgents(
 function AutomationAgentLine({
   agents,
   providers,
+  compact = false,
 }: {
   agents: readonly AutomationAgentSummary[];
   providers: ProviderList;
+  /** Logo instead of the harness name, for narrow cards. */
+  compact?: boolean;
 }) {
   if (agents.length === 0) {
     return (
@@ -263,11 +353,13 @@ function AutomationAgentLine({
       .flatMap((info) => info.reasoningLevels ?? [])
       .find((option) => option.id === level)?.label ?? level;
   const parts = [
-    providerIds
-      .map((id) =>
-        id === null ? "Agent" : (providerOf(id)?.displayName ?? id),
-      )
-      .join(" ⇄ "),
+    compact
+      ? ""
+      : providerIds
+          .map((id) =>
+            id === null ? "Agent" : (providerOf(id)?.displayName ?? id),
+          )
+          .join(" ⇄ "),
     models.join(" ⇄ "),
     levels.map(levelLabel).join(" ⇄ "),
   ].filter((part) => part !== "");
@@ -431,6 +523,18 @@ function AutomationRowMetadata({
   );
 }
 
+function FailedBadge({ error }: { error: string | null }) {
+  return (
+    <span
+      title={error ?? undefined}
+      className="inline-flex shrink-0 items-center gap-1 self-center whitespace-nowrap rounded-full bg-destructive/10 px-2 py-0.5 text-2xs font-medium text-destructive-text"
+    >
+      <span className="size-1.5 rounded-full bg-destructive" aria-hidden />
+      Failed
+    </span>
+  );
+}
+
 function NeedsYouBadge({ count }: { count: number }) {
   if (count === 0) return null;
   return (
@@ -472,8 +576,34 @@ function LoopStat({
   );
 }
 
+function LoopLocation({ cloud }: { cloud: boolean }) {
+  return (
+    <>
+      <span
+        className={cn(
+          "flex shrink-0 items-center gap-1",
+          cloud ? "text-primary-text" : "text-muted-foreground",
+        )}
+      >
+        <Icon
+          name={cloud ? "Cloud" : "Laptop"}
+          className="size-3.5"
+          aria-hidden
+        />
+        {cloud ? "Cloud" : "Local"}
+      </span>
+      <span aria-hidden className="text-muted-foreground/40">
+        ·
+      </span>
+    </>
+  );
+}
+
 function AutomationListRow({
+  cloud,
+  leading,
   status,
+  lastError = null,
   name,
   agentLine,
   schedule,
@@ -487,7 +617,10 @@ function AutomationListRow({
   openLabel,
   onOpen,
 }: {
+  cloud: boolean;
+  leading?: ReactNode;
   status: AutomationResponse["lastRunStatus"];
+  lastError?: string | null;
   name: string;
   agentLine: ReactNode;
   schedule: string;
@@ -503,12 +636,18 @@ function AutomationListRow({
 }) {
   return (
     <ResourceRow
-      leading={<AutomationStatusDot status={status} />}
+      leading={leading ?? <AutomationStatusDot status={status} />}
       title={name}
-      state={<NeedsYouBadge count={needsYou} />}
+      state={
+        <>
+          {status === "failed" ? <FailedBadge error={lastError} /> : null}
+          <NeedsYouBadge count={needsYou} />
+        </>
+      }
       description={
         <>
           <span className="mt-1.5 flex min-w-0 items-center gap-1.5 text-muted-foreground/80">
+            <LoopLocation cloud={cloud} />
             {agentLine}
           </span>
           <span className="mt-1 flex min-w-0 items-center gap-1.5">
@@ -538,7 +677,7 @@ function AutomationListRow({
           </span>
         </>
       }
-      className="rounded-lg border border-border bg-surface-raised px-3 transition-colors hover:border-foreground/20"
+      className="rounded-lg border border-border bg-surface-raised px-4 transition-colors hover:border-foreground/20"
       muted={muted}
       openLabel={openLabel}
       onOpen={onOpen}
@@ -556,6 +695,7 @@ export function OverviewRow({
   showProject,
   now,
   needsYou = 0,
+  leading,
   onNavigate,
   onEnabledChange,
 }: {
@@ -566,6 +706,7 @@ export function OverviewRow({
   showProject: boolean;
   now: number;
   needsYou?: number;
+  leading?: ReactNode;
   onNavigate: (route: AutomationDetailRoute) => void;
   onEnabledChange: (
     enabled: boolean,
@@ -585,7 +726,10 @@ export function OverviewRow({
 
   return (
     <AutomationListRow
+      cloud={false}
+      leading={leading}
       status={automation.lastRunStatus}
+      lastError={automation.lastError}
       name={automation.name}
       agentLine={
         <>
@@ -649,18 +793,22 @@ export function CloudAutomationRow({
   providers,
   now,
   needsYou = 0,
+  leading,
   actions,
 }: {
   automation: CloudAutomation;
   providers: ProviderList;
   now: number;
   needsYou?: number;
+  leading?: ReactNode;
   actions: CloudAutomationActions;
 }) {
   const nextRunAt =
     automation.next_run_at === null ? null : Date.parse(automation.next_run_at);
   return (
     <AutomationListRow
+      cloud
+      leading={leading}
       status={
         automation.last_error !== null
           ? "failed"
@@ -668,6 +816,7 @@ export function CloudAutomationRow({
             ? "succeeded"
             : null
       }
+      lastError={automation.last_error}
       name={automation.name}
       agentLine={
         <AutomationAgentLine
@@ -834,7 +983,7 @@ function automationSearchValues(
   automation: OverviewEntry["automation"],
   projectName: string,
 ): string[] {
-  const values = [automation.name, projectName];
+  const values = [automation.name, projectName, "Local"];
   if ("problem" in automation) {
     values.push(automationProblemSearchText(automation));
     if (automation.problem === "invalid-stored-data") return values;
@@ -854,7 +1003,8 @@ function isActiveEntry({ automation }: OverviewEntry): boolean {
 type ListItem = {
   name: string;
   nextRunAt: number | null;
-  cloud: boolean;
+  rank: number;
+  priority: LoopPriority;
   node: ReactNode;
 };
 
@@ -870,6 +1020,26 @@ function sortByNextRun(
       direction,
     ),
   );
+}
+
+function sortByName(
+  items: readonly ListItem[],
+  direction: AutomationSortDirection,
+): ListItem[] {
+  return [...items].sort(
+    (left, right) =>
+      left.rank - right.rank ||
+      applyAutomationSortDirection(
+        left.name.localeCompare(right.name),
+        direction,
+      ),
+  );
+}
+
+function cloudLifecycleSortRank(automation: CloudAutomation): number {
+  const once = automation.cron === null && !isCloudWebhook(automation);
+  if (!automation.enabled) return once && automation.runs > 0 ? 3 : 2;
+  return once ? 1 : 0;
 }
 
 function cloudNextRunAt(automation: CloudAutomation): number | null {
@@ -937,6 +1107,8 @@ export function AutomationOverviewView({
   onModeChange,
   cloud,
   review,
+  templates,
+  localDialog,
 }: {
   entries: OverviewEntry[] | null;
   error: string | null;
@@ -957,6 +1129,14 @@ export function AutomationOverviewView({
     actions: CloudAutomationActions;
   };
   review?: LoopReviewState;
+  templates?: LoopTemplatesState;
+  localDialog?: {
+    automationId: string;
+    render: (
+      priority: LoopPriority,
+      onPriorityChange: (priority: LoopPriority) => void,
+    ) => ReactNode;
+  };
 }) {
   const [query, setQuery] = useState("");
   const [reviewLayout, setReviewLayout] = useState<ReviewLayout>("list");
@@ -970,7 +1150,8 @@ export function AutomationOverviewView({
   const [sortMode, setSortMode] = useState<AutomationSortMode>("next");
   const [sortDirection, setSortDirection] =
     useState<AutomationSortDirection>("asc");
-  const [showInactive, setShowInactive] = useState(false);
+  const { priorities, setPriority } = useLoopPriorities();
+  const [openCloudId, setOpenCloudId] = useState<string | null>(null);
   const { providers } = useProviders();
   const now = useMinuteClock();
 
@@ -1062,6 +1243,7 @@ export function AutomationOverviewView({
     (entry) => !isActiveEntry(entry),
   );
   const cloudRows = cloud?.rows ?? [];
+  const openCloud = cloudRows.find((row) => row.id === openCloudId);
   const visibleCloud = cloudRows.filter(
     (automation) =>
       projectFilters.length === 0 &&
@@ -1072,8 +1254,6 @@ export function AutomationOverviewView({
           value.toLowerCase().includes(normalizedQuery),
         )),
   );
-  const inactiveOpen =
-    showInactive || normalizedQuery !== "" || statusFilters.length > 0;
   const handleSortChange = useCallback(
     (nextSort: string) => {
       if (
@@ -1131,6 +1311,15 @@ export function AutomationOverviewView({
       const key = item.loop.id ?? item.loop.name;
       needsYou.set(key, (needsYou.get(key) ?? 0) + 1);
     }
+    const priorityOf = (key: string) =>
+      priorities[key] ?? DEFAULT_LOOP_PRIORITY;
+    const priorityMenu = (key: string, name: string) => (
+      <LoopPriorityMenu
+        priority={priorityOf(key)}
+        name={name}
+        onChange={(priority) => setPriority(key, priority)}
+      />
+    );
     const renderEntry = ({
       automation,
       project,
@@ -1153,6 +1342,7 @@ export function AutomationOverviewView({
           showProject={projectBucketCount > 1}
           now={now}
           needsYou={needsYou.get(automation.id) ?? 0}
+          leading={priorityMenu(`local:${automation.id}`, automation.name)}
           onNavigate={onOpenDetail}
           onEnabledChange={onEnabledChange}
         />
@@ -1161,13 +1351,18 @@ export function AutomationOverviewView({
       name: entry.automation.name,
       nextRunAt:
         "problem" in entry.automation ? null : entry.automation.nextRunAt,
-      cloud: false,
+      rank:
+        "problem" in entry.automation
+          ? 0
+          : automationLifecycleSortRank(entry.automation),
+      priority: priorityOf(`local:${entry.automation.id}`),
       node: renderEntry(entry),
     });
     const cloudItem = (automation: CloudAutomation): ListItem => ({
       name: automation.name,
       nextRunAt: cloudNextRunAt(automation),
-      cloud: true,
+      rank: cloudLifecycleSortRank(automation),
+      priority: priorityOf(`cloud:${automation.id}`),
       node: cloud ? (
         <CloudAutomationRow
           key={automation.id}
@@ -1175,7 +1370,11 @@ export function AutomationOverviewView({
           providers={providers}
           now={now}
           needsYou={needsYou.get(automation.name) ?? 0}
-          actions={cloud.actions}
+          leading={priorityMenu(`cloud:${automation.id}`, automation.name)}
+          actions={{
+            ...cloud.actions,
+            onOpen: (a) => setOpenCloudId(a.id),
+          }}
         />
       ) : null,
     });
@@ -1191,13 +1390,19 @@ export function AutomationOverviewView({
     const activeItems =
       sortMode === "next"
         ? sortByNextRun(activeRest, sortDirection)
-        : activeRest;
-    const inactiveItems = [
+        : sortMode === "alpha"
+          ? sortByName(activeRest, sortDirection)
+          : activeRest;
+    const inactiveRest = [
       ...inactiveEntries.map(localItem),
       ...visibleCloud
         .filter((automation) => !automation.enabled)
         .map(cloudItem),
     ];
+    const inactiveItems =
+      sortMode === "alpha"
+        ? sortByName(inactiveRest, sortDirection)
+        : inactiveRest;
     const nextRunAt = Math.min(
       ...activeItems.flatMap((item) => item.nextRunAt ?? []),
     );
@@ -1212,44 +1417,6 @@ export function AutomationOverviewView({
       (sum, count) => sum + count,
       0,
     );
-    const column = (isCloud: boolean) => {
-      const items = activeItems.filter((item) => item.cloud === isCloud);
-      return (
-        <section
-          className="min-w-0"
-          aria-label={isCloud ? "Cloud" : "This Mac"}
-        >
-          <div className="flex items-center gap-2 pb-2 text-xs">
-            <Icon
-              name={isCloud ? "Cloud" : "Laptop"}
-              className={cn(
-                "size-3.5",
-                isCloud ? "text-primary-text" : "text-muted-foreground",
-              )}
-              aria-hidden
-            />
-            <span className="text-sm font-medium text-foreground">
-              {isCloud ? "Cloud" : "This Mac"}
-            </span>
-            <span className="text-muted-foreground">{items.length}</span>
-            <span className="ml-auto truncate text-muted-foreground/70">
-              {isCloud
-                ? "runs while your Mac is off"
-                : "runs while your Mac is awake"}
-            </span>
-          </div>
-          {items.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-border px-3.5 py-3 text-xs text-muted-foreground">
-              {isCloud
-                ? "No cloud loops running."
-                : "No loops running on this Mac."}
-            </div>
-          ) : (
-            <div className="space-y-2">{items.map((item) => item.node)}</div>
-          )}
-        </section>
-      );
-    };
     body = (
       <div className="pb-6">
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -1279,34 +1446,43 @@ export function AutomationOverviewView({
             {problems.map(renderEntry)}
           </div>
         ) : null}
-        <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
-          {column(true)}
-          {column(false)}
-        </div>
+        {activeItems.length === 0 ? (
+          <div className="mt-8 rounded-lg border border-dashed border-border px-4 py-3 text-xs text-muted-foreground">
+            No loops running.
+          </div>
+        ) : (
+          <div className="mt-2">
+            {LOOP_PRIORITIES.map((priority) => {
+              const group = activeItems.filter(
+                (item) => item.priority === priority,
+              );
+              if (group.length === 0) return null;
+              return (
+                <section key={priority} aria-label={`Priority ${priority}`}>
+                  <LoopGroupDivider
+                    label={`P${priority}`}
+                    count={group.length}
+                    className={LOOP_PRIORITY_STYLE[priority].text}
+                  />
+                  <div className="space-y-2.5">
+                    {group.map((item) => item.node)}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+        )}
         {inactiveItems.length > 0 ? (
-          <>
-            <button
-              type="button"
-              aria-expanded={inactiveOpen}
-              onClick={() => setShowInactive(!inactiveOpen)}
-              className="mt-8 flex cursor-pointer items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
-            >
-              <Icon
-                name={inactiveOpen ? "ChevronDown" : "ChevronRight"}
-                className="size-3.5"
-                aria-hidden
-              />
-              Paused &amp; finished
-              <span className="text-muted-foreground/60">
-                {inactiveItems.length}
-              </span>
-            </button>
-            {inactiveOpen ? (
-              <div className="mt-3 grid grid-cols-1 gap-2 lg:grid-cols-2">
-                {inactiveItems.map((item) => item.node)}
-              </div>
-            ) : null}
-          </>
+          <section aria-label="Off" className="mt-4">
+            <LoopGroupDivider
+              label="Off"
+              count={inactiveItems.length}
+              className="text-muted-foreground"
+            />
+            <div className="space-y-2.5">
+              {inactiveItems.map((item) => item.node)}
+            </div>
+          </section>
         ) : null}
       </div>
     );
@@ -1320,6 +1496,9 @@ export function AutomationOverviewView({
           : undefined
       }
       underlineTabs
+      bandClassName={
+        activeMode === "installed" ? OVERVIEW_BAND_CLASSES : undefined
+      }
       modes={[
         {
           id: "installed",
@@ -1332,7 +1511,7 @@ export function AutomationOverviewView({
           label: "Review",
           count: review?.data?.toReview || undefined,
         },
-        { id: "browse", label: "Browse" },
+        { id: "templates", label: "Templates" },
       ]}
       activeMode={activeMode}
       onModeChange={onModeChange}
@@ -1429,24 +1608,54 @@ export function AutomationOverviewView({
             onMark={review.onMark}
           />
         </ResourceCollectionViewport>
-      ) : activeMode === "browse" ? (
-        <ResourceCollectionViewport contentClassName="space-y-3">
-          <ResourceBrowseGrid>
-            {AUTOMATION_CREATE_TEMPLATES.map((template) => (
-              <ResourceTemplateBrowseCard
-                key={template.label}
-                title={template.label}
-                description={template.description}
-                onUse={() => onCreateViaChat(template.prompt)}
+      ) : activeMode === "templates" && templates ? (
+        <ResourceCollectionViewport scrollId="automations-templates">
+          <LoopTemplatesView
+            entries={entries}
+            cloudRows={cloudRows}
+            templates={{
+              ...templates,
+              onAdd: async (template, projectIds, target) => {
+                const keys = await templates.onAdd(template, projectIds, target);
+                for (const key of keys) setPriority(key, template.priority);
+                return keys;
+              },
+            }}
+            renderAgent={(agent) => (
+              <AutomationAgentLine
+                agents={[agent]}
+                providers={providers}
+                compact
               />
-            ))}
-          </ResourceBrowseGrid>
+            )}
+          />
         </ResourceCollectionViewport>
       ) : (
         <ResourceCollectionViewport scrollId="automations-installed-results">
-          {body}
+          <div className={OVERVIEW_BAND_CLASSES}>{body}</div>
         </ResourceCollectionViewport>
       )}
+      {openCloud && cloud ? (
+        <CloudLoopDialog
+          automation={openCloud}
+          priority={
+            priorities[`cloud:${openCloud.id}`] ?? DEFAULT_LOOP_PRIORITY
+          }
+          onPriorityChange={(priority) =>
+            setPriority(`cloud:${openCloud.id}`, priority)
+          }
+          actions={cloud.actions}
+          onClose={() => setOpenCloudId(null)}
+        />
+      ) : null}
+      {localDialog
+        ? localDialog.render(
+            priorities[`local:${localDialog.automationId}`] ??
+              DEFAULT_LOOP_PRIORITY,
+            (priority) =>
+              setPriority(`local:${localDialog.automationId}`, priority),
+          )
+        : null}
     </ResourceCollectionPage>
   );
 }

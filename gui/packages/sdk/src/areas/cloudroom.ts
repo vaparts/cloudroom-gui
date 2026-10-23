@@ -99,6 +99,10 @@ export type CloudEnvironmentChange =
   | { action: "removeRepo"; repo: string }
   | { action: "githubRepos" };
 export type AutoDeleteDays = 30 | 90 | 180 | 365 | null;
+/** A plan's name and how long it keeps unused cloud threads, in days and in words. */
+export type AutoDeleteLimit = { name: string; days: number; label: string };
+/** The setting, the days unused threads really stay, the plan limit that caps them, and the plan that allows longer. Null from older websites. */
+export type AutoDeleteSetting = { days: AutoDeleteDays; kept: number | null; plan: AutoDeleteLimit | null; upgrade: AutoDeleteLimit | null };
 
 /** An automation that runs in the cloud (ADR 0212): the website re-prompts a Cloud thread on a schedule. */
 export interface CloudAutomation {
@@ -223,12 +227,12 @@ export interface CloudroomArea {
   setCopyLogins(enabled: boolean): Promise<void>;
   environment(signal?: AbortSignal): Promise<CloudEnvironment>;
   updateEnvironment(change: CloudEnvironmentChange): Promise<CloudEnvironment>;
-  autoDelete(signal?: AbortSignal): Promise<{ days: AutoDeleteDays }>;
+  autoDelete(signal?: AbortSignal): Promise<AutoDeleteSetting>;
   /** Lists, creates, changes, runs, or deletes cloud automations. */
   automations(input: CloudAutomationRequest): Promise<CloudAutomationResponse>;
   /** Organizations (docs/scopes/organizations.md): passes one request to the website's `/api/desktop/org`, signed in as this account. */
   org(input: { action: string } & Record<string, unknown>): Promise<unknown>;
-  setAutoDelete(days: AutoDeleteDays): Promise<{ days: AutoDeleteDays }>;
+  setAutoDelete(days: AutoDeleteDays): Promise<AutoDeleteSetting>;
   /** Names of API keys and tokens set in this Mac's login shell, never their values. */
   macVariables(signal?: AbortSignal): Promise<{ names: string[] }>;
   /** Copies the named variables from this Mac's login shell into the Cloud environment. */
@@ -354,10 +358,10 @@ export function createCloudroomArea({ transport }: CreateSdkAreaArgs): Cloudroom
     setCopyLogins: (enabled) => transport.readVoid(request("/copy-logins", { enabled })),
     environment: (signal) => transport.readJson(request("/environment", undefined, signal)) as Promise<CloudEnvironment>,
     updateEnvironment: (change) => transport.readJson(request("/environment", change)) as Promise<CloudEnvironment>,
-    autoDelete: (signal) => transport.readJson(request("/auto-delete", undefined, signal)) as Promise<{ days: AutoDeleteDays }>,
+    autoDelete: (signal) => transport.readJson(request("/auto-delete", undefined, signal)) as Promise<AutoDeleteSetting>,
     automations: (input) => transport.readJson(request("/automations", input)) as Promise<CloudAutomationResponse>,
     org: (input) => transport.readJson(request("/org", input)),
-    setAutoDelete: (days) => transport.readJson(request("/auto-delete", { days })) as Promise<{ days: AutoDeleteDays }>,
+    setAutoDelete: (days) => transport.readJson(request("/auto-delete", { days })) as Promise<AutoDeleteSetting>,
     macVariables: (signal) => transport.readJson(request("/environment/mac", undefined, signal)) as Promise<{ names: string[] }>,
     importMacVariables: (names) => transport.readJson(request("/environment/mac", { names })) as Promise<CloudEnvironment>,
     cloudSkills: (signal) => transport.readJson(request("/skills", undefined, signal)) as Promise<CloudSkills>,

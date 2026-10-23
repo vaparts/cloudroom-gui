@@ -1,5 +1,9 @@
 import { useCallback } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
 import type { Thread } from "@cloudroom/domain";
 import type {
   ReorderPinnedThreadRequest,
@@ -13,6 +17,7 @@ import {
   applyReorderPinnedThreadResult,
   applyThreadPinStateResult,
   applyThreadReadStateResult,
+  applyThreadReasoningResult,
   applyThreadUpdateResult,
   beginArchiveThreadAndChildrenTransaction,
   beginDeleteThreadTransaction,
@@ -35,14 +40,19 @@ import {
   type ArchiveThreadsTransaction,
   type DeleteThreadTransaction,
   type PinnedThreadOrderTransaction,
+  type PinThreadPosition,
   type ThreadListMutationTransaction,
 } from "../cache-owners/thread-state-cache-owner";
+import { threadReasoningSaveKey } from "../queries/query-keys";
 
 interface ThreadMutationRequest {
   id: string;
 }
 
 type UpdateThreadMutationRequest = ThreadMutationRequest & UpdateThreadRequest;
+type PinThreadMutationRequest = ThreadMutationRequest & {
+  position?: PinThreadPosition;
+};
 type ReorderPinnedThreadMutationRequest = ThreadMutationRequest &
   ReorderPinnedThreadRequest;
 type UnpinAndMoveThreadMutationRequest = ThreadMutationRequest & {
@@ -58,6 +68,22 @@ interface UpdateThreadMutationOptions {
   threadId?: string;
   errorMessage?: string | undefined;
   lifecycleOperation?: LifecycleErrorOperation | undefined;
+  reasoning?: boolean;
+}
+
+export function waitForThreadReasoningSave(
+  queryClient: QueryClient,
+  threadId: string,
+): Promise<void> {
+  const filters = { mutationKey: threadReasoningSaveKey(threadId) };
+  return new Promise((resolve) => {
+    if (queryClient.isMutating(filters) === 0) return resolve();
+    const unsubscribe = queryClient.getMutationCache().subscribe(() => {
+      if (queryClient.isMutating(filters) > 0) return;
+      unsubscribe();
+      resolve();
+    });
+  });
 }
 
 interface ArchiveThreadAndChildrenMutationRequest {
@@ -83,7 +109,10 @@ export function useUpdateThread(options?: UpdateThreadMutationOptions) {
     UpdateThreadMutationRequest,
     ThreadListMutationTransaction | undefined
   >({
-    mutationKey: ["thread-update", options?.threadId],
+    mutationKey:
+      options?.reasoning && options.threadId
+        ? threadReasoningSaveKey(options.threadId)
+        : ["thread-update", options?.threadId],
     ...(options?.threadId
       ? { scope: { id: `thread-update:${options.threadId}` } }
       : {}),
@@ -125,12 +154,14 @@ export function useUpdateThread(options?: UpdateThreadMutationOptions) {
       });
     },
     onSuccess: (thread, request) =>
-      applyThreadUpdateResult({
-        queryClient,
-        thread,
-        executionOptionsChanged:
-          "model" in request || "reasoningLevel" in request,
-      }),
+      options?.reasoning
+        ? applyThreadReasoningResult({ queryClient, thread, request })
+        : applyThreadUpdateResult({
+            queryClient,
+            thread,
+            executionOptionsChanged:
+              "model" in request || "reasoningLevel" in request,
+          }),
   });
 }
 
@@ -141,11 +172,22 @@ export function usePinThread() {
     meta: {
       errorMessage: "Failed to pin thread.",
     },
-    mutationFn: ({ id }: ThreadMutationRequest) =>
-      sdk.threads.pin({ threadId: id }),
-    onMutate: async ({ id }): Promise<ThreadListMutationTransaction> =>
+    mutationFn: async ({ id, position }: PinThreadMutationRequest) => {
+      const thread = await sdk.threads.pin({ threadId: id });
+      const orderedRoots = position
+        ? await sdk.threads
+            .reorderPinned({ threadId: id, ...position })
+            .catch(() => null)
+        : null;
+      return { orderedRoots, thread };
+    },
+    onMutate: async ({
+      id,
+      position,
+    }): Promise<ThreadListMutationTransaction> =>
       beginPinThreadTransaction({
         pinnedAt: Date.now(),
+        position,
         queryClient,
         threadId: id,
       }),
@@ -156,8 +198,17 @@ export function usePinThread() {
         transaction: context,
       });
     },
-    onSuccess: (thread) => {
-      applyThreadPinStateResult({ queryClient, thread, pinSortKey: null });
+    onSuccess: ({ orderedRoots, thread }) => {
+      applyThreadPinStateResult({
+        queryClient,
+        thread,
+        pinSortKey:
+          orderedRoots?.find((root) => root.id === thread.id)?.pinSortKey ??
+          null,
+      });
+      if (orderedRoots) {
+        applyReorderPinnedThreadResult({ orderedRoots, queryClient });
+      }
     },
     onSettled: (_data, _error, variables) => {
       settleThreadListMembershipMutation({

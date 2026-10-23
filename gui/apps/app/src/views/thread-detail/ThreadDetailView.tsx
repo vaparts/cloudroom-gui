@@ -2481,6 +2481,14 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
       pluginFileOpeners,
     ],
   );
+  const movedProjectId =
+    thread && thread.projectId !== projectId ? thread.projectId : null;
+  useEffect(() => {
+    if (movedProjectId)
+      navigate(getThreadRoutePath({ projectId: movedProjectId, threadId }), {
+        replace: true,
+      });
+  }, [movedProjectId, navigate, threadId]);
   const handleOpenFilePreview = useCallback<OpenFilePreviewHandler>(
     (relativePath) => {
       if (
@@ -2501,7 +2509,7 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
     [handleOpenLiveFilePreview, thread?.environmentId],
   );
 
-  if (threadQueryState.status === "loading") {
+  if (threadQueryState.status === "loading" || movedProjectId) {
     return <RouteLoadingSkeleton isBoundedPane={isBoundedPane} />;
   }
   if (!thread || thread.projectId !== projectId) {

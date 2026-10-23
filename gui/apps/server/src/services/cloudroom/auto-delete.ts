@@ -8,7 +8,8 @@ import { bindings } from "./store.js";
 
 export const autoDeleteDaysSchema = z.union([z.literal(30), z.literal(90), z.literal(180), z.literal(365), z.null()]);
 export type AutoDeleteDays = z.infer<typeof autoDeleteDaysSchema>;
-const settingSchema = z.object({ days: autoDeleteDaysSchema });
+const limitSchema = z.object({ name: z.string().max(40), days: z.number().int().positive(), label: z.string().max(40) }).nullable().catch(null);
+const settingSchema = z.object({ days: autoDeleteDaysSchema, kept: z.number().int().positive().nullable().catch(null), plan: limitSchema, upgrade: limitSchema });
 const deletedSchema = z.object({ threads: z.array(z.string()) });
 
 export async function readAutoDelete(deps: AppDeps) {

@@ -42,6 +42,7 @@
 ## VERIFICATION
 - From `gui/`: `pnpm install --frozen-lockfile`; `pnpm exec turbo run build typecheck --filter=@cloudroom/app --filter=@cloudroom/server --filter=@cloudroom/desktop --concurrency=2`; `pnpm exec turbo run test --filter=@cloudroom/scripts --filter=@cloudroom/config --concurrency=2`. Dated suite limitations are in the [cutover record](../archive/docs/development-cutover.md#step-4-verification).
 - Run builds, typechecks, and tests through Turbo: `pnpm exec turbo run <task> --filter=<package>`.
+- Never pass prompt or loop text as `pnpm <script>` arguments. Text in backticks can run as real commands, such as a template's `room-cli thread archive --self`. Run the script's command directly instead, e.g. `node --conditions=source --import tsx packages/scripts/src/commands/run-cli.ts ...` for `room:dev`.
 - Test real behavior and plausible failures, not trivial wiring.
 - Use `sharedWorkerProjects` from `vitest.shared.ts`; isolate tests that mutate globals.
 - Keep generated files untracked. Give generators explicit Turbo inputs, outputs, and dependencies.

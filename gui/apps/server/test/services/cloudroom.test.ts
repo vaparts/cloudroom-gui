@@ -746,6 +746,9 @@ it("keeps each queued follow-up's reasoning and rejects locked or conflicting ch
     expect((await send(thread.id, { requestId: "legacy-launch", mode: "auto", reasoningLevel: "max", input: text })).status).toBe(409);
     record("receipt", { request_id: "plain", command: "prompt", state: "failed", error: "Pi model does not support the selected thinking level" });
     await expect.poll(() => harness.db.select().from(events).all().some((event) => event.type === "system/error" && JSON.parse(event.data).message.includes("thinking level"))).toBe(true);
+    // Core restarts a killed agent idle and keeps the cause on the lost turn.
+    record("receipt", { request_id: "xhigh-turn", command: "prompt", state: "unknown_after_restart", error: "invalid native state: unmanaged Claude subagent emitted output (signal 9)" });
+    await expect.poll(() => harness.db.select().from(events).all().some((event) => event.type === "system/error" && JSON.parse(event.data).message.includes("unmanaged Claude subagent"))).toBe(true);
   } finally {
     service.stop();
     core.closeAllConnections();

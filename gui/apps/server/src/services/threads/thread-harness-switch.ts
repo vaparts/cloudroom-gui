@@ -56,7 +56,11 @@ export async function switchThreadHarness(
   const from = await withThreadContextClearGuard(threadId, async () => {
     const thread = requireSwitchableThread(deps, threadId);
     const prepare = async () => {
-      const seed = await historySeed(deps, thread, target.providerId);
+      const seed = await historySeed(
+        deps,
+        thread,
+        `[Cloudroom] This conversation started with another agent (${thread.providerId}). You are now continuing it as ${target.providerId}.`,
+      );
       return (tx: DbTransaction) => {
         appendThreadEventInTransaction(tx, {
           threadId,
@@ -146,10 +150,11 @@ function requireSwitchableThread(
   return thread;
 }
 
-async function historySeed(
-  deps: LoggedPendingInteractionWorkSessionDeps,
+export async function historySeed(
+  deps: Pick<LoggedPendingInteractionWorkSessionDeps, "config" | "db">,
   thread: Thread,
-  to: string,
+  intro: string,
+  projectId = thread.projectId,
 ): Promise<PromptInput[]> {
   const after =
     getLatestCompletedThreadContextClearSequence(deps.db, {
@@ -157,9 +162,9 @@ async function historySeed(
     }) ?? undefined;
   return messagesSeed(
     deps.config.dataDir,
-    thread.projectId,
+    projectId,
     threadMessages(deps.db, thread.id, { after }),
-    `[Cloudroom] This conversation started with another agent (${thread.providerId}). You are now continuing it as ${to}.`,
+    intro,
   );
 }
 

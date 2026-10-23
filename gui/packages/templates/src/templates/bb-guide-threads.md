@@ -333,6 +333,14 @@ Ownership:
   changed. --provider, or any model change in Cloud, switches the thread in place:
   the next turn starts a fresh session with the conversation so far.
 
+  room-cli thread move [id] --project <id-or-name>
+    --self                                 Target current thread
+
+  Moves a Local or Cloud thread to another project. It keeps its ID and chat;
+  its next turn starts a fresh session in that project's folder (on the same
+  Mac, or in the same sandbox) with the conversation so far. The old folder
+  stays as it is. A running thread moves when its current turn ends.
+
   room-cli thread read [id]                      Mark read
   room-cli thread unread [id]                    Mark unread
   room-cli thread reorder-pinned <id> [--after <id>] [--before <id>]

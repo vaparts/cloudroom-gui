@@ -10,13 +10,7 @@ import { useAtomValue } from "jotai";
 import { Icon } from "@cloudroom/shared-ui/icon";
 import { Pill } from "@cloudroom/shared-ui/pill";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@cloudroom/shared-ui/tooltip";
-import {
-  HoverCard,
-  HoverCardContent,
-  HoverCardTrigger,
-} from "@cloudroom/shared-ui/hover-card";
 import type { ThreadPurpose } from "@cloudroom/domain";
-import { formatRelativeTime } from "@/lib/relative-time";
 import {
   AppPageHeader,
   COMPACT_SHELF_HIDDEN_PAGE_HEADER_ACTIONS_CLASS,
@@ -34,6 +28,7 @@ import { useAppCommandShortcut } from "@/components/commands/AppCommandProvider"
 import { AppCommandShortcutHint } from "@/components/commands/AppCommandShortcutHint";
 import { useInlineThreadTitle } from "@/components/thread/InlineThreadTitle";
 import { useThreadActions } from "@/components/thread/ThreadActionsProvider";
+import { ThreadPurposeHoverCard } from "@/components/thread/ThreadPurposeHoverCard";
 import { ThreadTitleMentions } from "@/components/thread/ThreadTitleMentions";
 import { SecondaryPanelHostLayoutContext } from "@/components/secondary-panel/SecondaryPanelHostLayoutContext";
 import { RIGHT_PANEL_TOGGLE_ICON_NAME } from "@/components/secondary-panel/panelToggleControlState";
@@ -59,46 +54,6 @@ interface ThreadDetailHeaderProps {
   threadId: string;
   threadPurpose?: ThreadPurpose | null;
   threadTitle: string;
-}
-
-function ThreadPurposeHoverCard({
-  children,
-  purpose,
-}: {
-  children: ReactNode;
-  purpose: ThreadPurpose | null;
-}) {
-  if (!purpose) return children;
-  return (
-    <HoverCard openDelay={250} closeDelay={100}>
-      <HoverCardTrigger asChild>{children}</HoverCardTrigger>
-      <HoverCardContent
-        align="start"
-        sideOffset={8}
-        className="w-[420px] max-w-[calc(100vw-2rem)] space-y-3 px-[18px] py-4"
-      >
-        <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-          <span className="font-medium uppercase tracking-wider">Purpose</span>
-          <span>
-            updated{" "}
-            {formatRelativeTime({ timestamp: purpose.updatedAt, now: Date.now() })}
-          </span>
-        </div>
-        <p className="text-sm leading-relaxed text-foreground">{purpose.text}</p>
-        <div className="flex items-center gap-3">
-          <div className="h-1 flex-1 overflow-hidden rounded-full bg-muted">
-            <div
-              className="h-full rounded-full bg-primary"
-              style={{ width: `${purpose.percent}%` }}
-            />
-          </div>
-          <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-            {purpose.percent}% done
-          </span>
-        </div>
-      </HoverCardContent>
-    </HoverCard>
-  );
 }
 
 export function ThreadDetailHeader({

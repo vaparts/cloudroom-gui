@@ -108,6 +108,20 @@ describe("callPluginRpc", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it("omits undefined object fields but rejects undefined array items", async () => {
+    const fetchImpl = vi.fn<FetchLike>(async () =>
+      jsonResponse({ ok: true, result: null }),
+    );
+    await callPluginRpc(fetchImpl, "demo", "start", {
+      mac: true,
+      id: undefined,
+    });
+    expect(fetchImpl.mock.calls[0]?.[1]?.body).toBe('{"mac":true}');
+    await expect(
+      callPluginRpc(fetchImpl, "demo", "list", { ids: [undefined] }),
+    ).rejects.toThrow("rpc input at $input.ids[0] is not a JSON value");
+  });
+
   it("falls back to an HTTP-status message for non-JSON failures", async () => {
     const fetchImpl = vi.fn<FetchLike>(async () => ({
       ok: false,

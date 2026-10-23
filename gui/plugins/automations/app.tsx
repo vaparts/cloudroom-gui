@@ -3,9 +3,11 @@ import type { ReactNode } from "react";
 import { buildAutomationEditThreadPrompt } from "@cloudroom/shared-ui/resource-edit-prompt";
 import {
   definePluginApp,
+  experimental_useProviders as useProviders,
   useBbNavigate,
   useRealtime,
   useRpc,
+  useSdk,
   type PluginNavPanelProps,
 } from "@get-bb/plugin-sdk/app";
 import type { automationRpcContract } from "./src/rpc.js";
@@ -19,7 +21,19 @@ import type {
   AutomationsOverviewResponse,
   ReviewResponse,
 } from "@/src/rpc-types";
-import { AutomationDetailView } from "./detail-view";
+import {
+  automationEnvironmentLabel,
+  providerModelRouting,
+  RunRow,
+  ScriptAutomationDefinition,
+} from "./detail-view";
+import {
+  Field,
+  LoopDialog,
+  type LoopDialogChanges,
+  type LoopDialogLoop,
+  type Priority,
+} from "./loop-dialog";
 import { replaceWebhookUrl, useCloudAutomations } from "./cloud-view";
 import {
   AutomationOverviewView,
@@ -29,6 +43,12 @@ import {
   type LoopReviewState,
 } from "./overview-view";
 import { PERSONAL_PROJECT_ID } from "./lib/format-schedule";
+import type { LoopTemplate } from "./templates";
+import type {
+  LoopTarget,
+  LoopTemplatesState,
+  TemplateProject,
+} from "./templates-view";
 import { Button } from "@cloudroom/shared-ui/button";
 import { DelayedLoading } from "@cloudroom/shared-ui/delayed-loading";
 import {
@@ -453,20 +473,129 @@ function DeleteAutomationDialog({
   );
 }
 
+// Templates tab: the repos to pick from, and one Cloud (default) or Local loop per picked repo.
+function useTemplates(onAdded: () => void): LoopTemplatesState {
+  const rpc = useRpc<typeof automationRpcContract>();
+  const sdk = useSdk();
+  const { providers } = useProviders();
+  const [projects, setProjects] = useState<TemplateProject[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    sdk.projects.list().then(
+      (list) => {
+        if (cancelled) return;
+        setProjects(
+          list
+            .filter((project) => project.id !== PERSONAL_PROJECT_ID)
+            .map((project) => ({
+              id: project.id,
+              name: project.name,
+              path:
+                (
+                  project.sources.find((source) => source.isDefault) ??
+                  project.sources[0]
+                )?.path ?? null,
+            }))
+            .sort((a, b) => a.name.localeCompare(b.name)),
+        );
+      },
+      () => !cancelled && setProjects([]),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [sdk]);
+  const onAdd = useCallback(
+    async (template: LoopTemplate, projectIds: string[], target: LoopTarget) => {
+      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      // The template's agent when it is set up here, else each project's default agent.
+      const ownAgent = providers.some(
+        (provider) => provider.id === template.providerId && provider.available,
+      );
+      const results = await Promise.allSettled(
+        projectIds.map(async (projectId) => {
+          const defaults = await sdk.projects.defaultExecutionOptions({
+            projectId,
+          });
+          const agent = ownAgent || defaults === null ? template : defaults;
+          if (target === "cloud") {
+            const { automation } = (await rpc.call("cloud_template_add", {
+              projectId,
+              name: template.name,
+              prompt: template.prompt,
+              cron: template.cron,
+              timezone,
+              providerId: agent.providerId,
+              model: agent.model,
+              reasoningLevel: agent.reasoningLevel,
+            })) as { automation: { id: string } };
+            return `cloud:${automation.id}`;
+          }
+          const created = await rpc.call("automations_create", {
+            projectId,
+            name: template.name,
+            origin: "human",
+            trigger: { triggerType: "schedule", cron: template.cron, timezone },
+            execution: {
+              mode: "agent",
+              prompt: template.prompt,
+              providerId: agent.providerId,
+              model: agent.model,
+              reasoningLevel: agent.reasoningLevel,
+              permissionMode: defaults?.permissionMode ?? "auto",
+              environment: { type: "project-default" },
+            },
+          });
+          return `local:${created.id}`;
+        }),
+      );
+      const failed = results.filter((result) => result.status === "rejected");
+      const added = results.length - failed.length;
+      if (added > 0) {
+        toast.success(
+          `${template.name} is on for ${added} repo${added === 1 ? "" : "s"}${target === "cloud" ? " in the Cloud" : ", on this Mac"}.`,
+        );
+      }
+      if (failed[0]?.status === "rejected") {
+        toast.error(
+          `Couldn't add ${template.name} to ${failed.length} repo${failed.length === 1 ? "" : "s"}: ${errorText(failed[0].reason)}`,
+        );
+      }
+      onAdded();
+      return results.flatMap((result) =>
+        result.status === "fulfilled" ? [result.value] : [],
+      );
+    },
+    [providers, rpc, sdk, onAdded],
+  );
+  return { projects, onAdd };
+}
+
 function OverviewView({
   onOpenDetail,
   activeMode,
   onModeChange,
+  openRoute,
+  onCloseRoute,
 }: {
   onOpenDetail: (route: DetailRoute, options?: { editing?: boolean }) => void;
   activeMode: AutomationCollectionMode;
   onModeChange: (mode: AutomationCollectionMode) => void;
+  openRoute: DetailRoute | null;
+  onCloseRoute: () => void;
 }) {
   const navigate = useBbNavigate();
   const { entries, error, refetch } = useOverview();
   const cloud = useCloudAutomations();
   const review = useReview();
   const mutations = useMutations();
+  const reloadCloud = cloud.reload;
+  const templates = useTemplates(
+    useCallback(() => {
+      refetch();
+      void reloadCloud();
+    }, [refetch, reloadCloud]),
+  );
 
   const changeEnabled = useCallback(
     async (enabled: boolean, route: DetailRoute) => {
@@ -502,92 +631,131 @@ function OverviewView({
       onModeChange={onModeChange}
       cloud={cloud}
       review={review}
+      templates={templates}
+      localDialog={
+        openRoute === null
+          ? undefined
+          : {
+              automationId: openRoute.automationId,
+              render: (priority, onPriorityChange) => (
+                <LocalLoopDialog
+                  key={openRoute.automationId}
+                  route={openRoute}
+                  priority={priority}
+                  onPriorityChange={onPriorityChange}
+                  onClose={onCloseRoute}
+                />
+              ),
+            }
+      }
     />
   );
 }
 
-function DetailView({
+const PERMISSION_LABELS: Record<string, string> = {
+  auto: "Auto",
+  "accept-edits": "Accept edits",
+  full: "Full access",
+};
+
+function localLoop(automation: AutomationResponse): LoopDialogLoop {
+  const { execution, trigger } = automation;
+  const agent = execution.mode === "agent";
+  return {
+    name: automation.name,
+    enabled: automation.enabled,
+    cloud: false,
+    nextRunAt: automation.nextRunAt,
+    runs: automation.runCount,
+    ...(agent ? { prompt: execution.prompt } : {}),
+    cron: trigger.triggerType === "schedule" ? trigger.cron : null,
+    timezone: trigger.triggerType === "schedule" ? trigger.timezone : "UTC",
+    webhook: trigger.triggerType === "webhook",
+    agent: agent
+      ? {
+          providerId: execution.providerId,
+          model: execution.model,
+          reasoningLevel: execution.reasoningLevel,
+          ...(execution.serviceTier ? { serviceTier: execution.serviceTier } : {}),
+        }
+      : null,
+    agentEditable: true,
+    ...(agent
+      ? { agentRouting: providerModelRouting(execution.environment) }
+      : {}),
+    runsOn: agent
+      ? `${
+          execution.targetThreadId !== undefined
+            ? "Existing thread"
+            : automationEnvironmentLabel(execution)
+        } · ${PERMISSION_LABELS[execution.permissionMode] ?? execution.permissionMode}`
+      : "Local · script",
+  };
+}
+
+function LocalLoopDialog({
   route,
-  initialEditing,
-  onBack,
+  priority,
+  onPriorityChange,
+  onClose,
 }: {
   route: DetailRoute;
-  initialEditing: boolean;
-  onBack: () => void;
+  priority: Priority;
+  onPriorityChange: (priority: Priority) => void;
+  onClose: () => void;
 }) {
   const navigate = useBbNavigate();
+  const rpc = useRpc<typeof automationRpcContract>();
   const { automation, error, refetch } = useAutomation(route);
-  const [editingRequested, setEditingRequested] = useState(initialEditing);
-  const overviewState = useOverview();
   const runsState = useRuns(route);
   const mutations = useMutations();
-  const [actionPending, setActionPending] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
-
-  const openThread = useCallback(
-    (threadId: string) => navigate.toThread(threadId),
-    [navigate],
+  const readable =
+    automation !== null && !("problem" in automation) ? automation : null;
+  const loop = useMemo(
+    () => (readable === null ? null : localLoop(readable)),
+    [readable],
   );
 
-  const editViaThread = useCallback(
-    (target: AutomationResponse) => {
-      navigate.toCompose({
-        focusPrompt: true,
-        initialPrompt: buildAutomationEditThreadPrompt({
-          name: target.name,
-          projectId: route.projectId,
-          automationId: route.automationId,
-        }),
-      });
-    },
-    [navigate, route],
-  );
+  const runAction = (method: "pause" | "resume" | "run") =>
+    mutations[method](route).then(
+      () => {
+        if (method === "run") toast.success("Run started");
+      },
+      (rpcError: unknown) =>
+        toast.error(`Failed to ${method} loop: ${errorText(rpcError)}`),
+    );
 
-  const runAction = useCallback(
-    (method: "pause" | "resume" | "run") => {
-      setActionPending(true);
-      mutations[method](route)
-        .then(
-          () => {
-            if (method === "run") toast.success("Run started");
-          },
-          (rpcError: unknown) =>
-            toast.error(`Failed to ${method} loop: ${errorText(rpcError)}`),
-        )
-        .finally(() => setActionPending(false));
-    },
-    [mutations, route],
-  );
-
-  const openEdit = useCallback(() => {
-    if (automation === null || "problem" in automation) return;
-    if (automation.execution.mode === "agent") {
-      setEditingRequested(true);
-      return;
+  const save = async (changes: LoopDialogChanges) => {
+    if (readable === null) return false;
+    const agent: AgentExecutionUpdate = {};
+    if (changes.prompt !== undefined) agent.prompt = changes.prompt;
+    if (changes.agent !== undefined) {
+      agent.providerId = changes.agent.providerId;
+      agent.model = changes.agent.model;
+      agent.reasoningLevel = changes.agent.reasoningLevel;
+      agent.serviceTier = changes.agent.serviceTier ?? null;
     }
-    editViaThread(automation);
-  }, [automation, editViaThread]);
+    try {
+      await rpc.call("automations_update", {
+        ...route,
+        ...(Object.keys(agent).length > 0 ? { agent } : {}),
+        ...(changes.cron !== undefined &&
+        readable.trigger.triggerType === "schedule"
+          ? { trigger: { ...readable.trigger, cron: changes.cron } }
+          : {}),
+      });
+      toast.success("Saved");
+      refetch();
+      return true;
+    } catch (rpcError: unknown) {
+      toast.error(`Failed to update loop: ${errorText(rpcError)}`);
+      return false;
+    }
+  };
 
-  const updateAgent = useCallback(
-    async (agent: AgentExecutionUpdate) => {
-      setActionPending(true);
-      try {
-        await mutations.update(route, agent);
-        toast.success("Loop updated");
-        setEditingRequested(false);
-        refetch();
-      } catch (rpcError: unknown) {
-        toast.error(`Failed to update loop: ${errorText(rpcError)}`);
-        throw rpcError;
-      } finally {
-        setActionPending(false);
-      }
-    },
-    [mutations, refetch, route],
-  );
-
-  const confirmDelete = useCallback(() => {
+  const confirmDelete = () => {
     setDeleting(true);
     mutations
       .delete(route)
@@ -595,112 +763,169 @@ function DetailView({
         () => {
           toast.success("Loop deleted");
           setDeleteOpen(false);
-          onBack();
+          onClose();
         },
         (rpcError: unknown) =>
           toast.error(`Failed to delete loop: ${errorText(rpcError)}`),
       )
       .finally(() => setDeleting(false));
-  }, [mutations, route, onBack]);
-
-  if (error !== null) {
-    return (
-      <ResourceListState
-        state="error"
-        message={`Couldn't load loop: ${error}`}
-        layout="detail"
-        onRetry={refetch}
-      />
-    );
-  }
-
-  if (automation === null) {
-    return (
-      <DelayedLoading>
-        <ResourceListState
-          state="loading"
-          message="Loading loop"
-          layout="detail"
-        />
-      </DelayedLoading>
-    );
-  }
+  };
 
   const deleteDialog = (
     <DeleteAutomationDialog
       open={deleteOpen}
       onOpenChange={setDeleteOpen}
-      name={automation.name}
+      name={automation?.name ?? "this loop"}
       pending={deleting}
       onConfirm={confirmDelete}
       onCancel={() => setDeleteOpen(false)}
     />
   );
 
-  if ("problem" in automation && automation.problem === "invalid-stored-data") {
+  if (error !== null) {
+    return (
+      <LoopStatusDialog
+        title="Couldn't load this loop"
+        message={error}
+        onClose={onClose}
+      >
+        <Button type="button" variant="outline" onClick={onClose}>
+          Close
+        </Button>
+        <Button type="button" onClick={refetch}>
+          Retry
+        </Button>
+      </LoopStatusDialog>
+    );
+  }
+  if (automation !== null && "problem" in automation) {
     return (
       <>
-        <div className="mx-auto w-full max-w-3xl space-y-3">
-          <ResourceListState
-            state="error"
-            message="The stored loop configuration cannot be read."
-            layout="detail"
-            onRetry={refetch}
-          />
-          <div className="flex justify-center">
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              disabled={deleting}
-              onClick={() => setDeleteOpen(true)}
-            >
-              Delete loop
-            </Button>
-          </div>
-        </div>
+        <LoopStatusDialog
+          title={automation.name}
+          message="The stored loop configuration cannot be read."
+          onClose={onClose}
+        >
+          <Button
+            type="button"
+            variant="destructive"
+            disabled={deleting}
+            onClick={() => setDeleteOpen(true)}
+          >
+            Delete loop
+          </Button>
+        </LoopStatusDialog>
         {deleteDialog}
       </>
     );
   }
-
-  const requiresPrompt =
-    automation.execution.mode === "agent" && automation.execution.prompt === "";
-  const readableAutomation: AutomationResponse = automation;
-
-  const overviewEntry = overviewState.entries?.find(
-    (entry) =>
-      entry.automation.projectId === route.projectId &&
-      entry.automation.id === route.automationId,
-  );
-  const projectLabel =
-    overviewEntry !== undefined
-      ? automationProjectLabel(overviewEntry.project)
-      : route.projectId === PERSONAL_PROJECT_ID
-        ? "Personal"
-        : route.projectId;
+  if (readable === null || loop === null) {
+    return (
+      <DelayedLoading>
+        <LoopStatusDialog
+          title="Loading loop…"
+          message="One moment."
+          onClose={onClose}
+        />
+      </DelayedLoading>
+    );
+  }
 
   return (
-    <AutomationDetailView
-      automation={readableAutomation}
-      projectLabel={projectLabel}
-      runsState={runsState}
-      actionPending={actionPending}
-      editing={requiresPrompt || editingRequested}
-      onToggle={(checked) => runAction(checked ? "resume" : "pause")}
-      onEdit={openEdit}
-      onCancelEdit={requiresPrompt ? onBack : () => setEditingRequested(false)}
-      onUpdateAgent={updateAgent}
-      onRunNow={() => runAction("run")}
-      onNewWebhookUrl={() =>
-        void replaceWebhookUrl(
-          async () => (await mutations.newWebhookUrl(route)).webhookUrl,
-        )
-      }
-      onDelete={() => setDeleteOpen(true)}
-      onOpenThread={openThread}
-      footer={deleteDialog}
-    />
+    <>
+      <LoopDialog
+        loop={loop}
+        priority={priority}
+        onPriorityChange={onPriorityChange}
+        onEnabledChange={(enabled) => void runAction(enabled ? "resume" : "pause")}
+        onRun={() => void runAction("run")}
+        onDelete={() => setDeleteOpen(true)}
+        onSave={save}
+        onClose={onClose}
+        body={
+          readable.execution.mode === "script" ? (
+            <Field label="Script">
+              <ScriptAutomationDefinition execution={readable.execution} />
+            </Field>
+          ) : undefined
+        }
+      >
+        <LoopRuns
+          state={runsState}
+          onOpenThread={(threadId) => navigate.toThread(threadId)}
+        />
+      </LoopDialog>
+      {deleteDialog}
+    </>
+  );
+}
+
+function LoopStatusDialog({
+  title,
+  message,
+  onClose,
+  children,
+}: {
+  title: string;
+  message: string;
+  onClose: () => void;
+  children?: ReactNode;
+}) {
+  return (
+    <Dialog open onOpenChange={(open) => (open ? undefined : onClose())}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{message}</DialogDescription>
+        </DialogHeader>
+        {children ? <DialogFooter>{children}</DialogFooter> : null}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function LoopRuns({
+  state,
+  onOpenThread,
+}: {
+  state: ReturnType<typeof useRuns>;
+  onOpenThread: (threadId: string) => void;
+}) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <span className="text-xs text-muted-foreground">Runs</span>
+      {state.error !== null ? (
+        <div className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2 text-sm text-muted-foreground">
+          Runs unavailable.
+          <Button type="button" variant="outline" size="sm" onClick={state.retry}>
+            Retry
+          </Button>
+        </div>
+      ) : state.loading ? null : state.runs.length === 0 ? (
+        <div className="rounded-md border border-border px-3 py-2 text-sm text-muted-foreground">
+          No runs yet.
+        </div>
+      ) : (
+        <div className="max-h-72 divide-y divide-border/60 overflow-y-auto rounded-md border border-border">
+          {state.runs.map((run) => (
+            <RunRow key={run.id} run={run} onOpenThread={onOpenThread} />
+          ))}
+          {state.nextCursor !== null ? (
+            <div className="flex justify-center py-1.5">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={state.loadingMore}
+                onClick={state.loadMore}
+              >
+                {state.loadingMore ? "Loading…" : "Load more"}
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -729,7 +954,11 @@ function AutomationsPanel({ subPath }: PluginNavPanelProps) {
   const navigate = useBbNavigate();
   const parsedRoute = useMemo(() => parseSubPath(subPath), [subPath]);
   const collectionMode: AutomationCollectionMode =
-    subPath === "browse" || subPath === "review" ? subPath : "installed";
+    subPath === "review" || subPath === "templates"
+      ? subPath
+      : subPath === "browse"
+        ? "templates"
+        : "installed";
   const openDetail = useCallback(
     (next: DetailRoute, options?: { editing?: boolean }) => {
       navigate.toPluginPanel(PANEL_PATH, {
@@ -751,23 +980,14 @@ function AutomationsPanel({ subPath }: PluginNavPanelProps) {
     },
     [navigate],
   );
-  if (parsedRoute !== null) {
-    return (
-      <AutomationsPageFrame fill={false}>
-        <DetailView
-          route={parsedRoute.route}
-          initialEditing={parsedRoute.editing}
-          onBack={backToList}
-        />
-      </AutomationsPageFrame>
-    );
-  }
   return (
     <AutomationsPageFrame fill>
       <OverviewView
         onOpenDetail={openDetail}
         activeMode={collectionMode}
         onModeChange={changeCollectionMode}
+        openRoute={parsedRoute?.route ?? null}
+        onCloseRoute={backToList}
       />
     </AutomationsPageFrame>
   );

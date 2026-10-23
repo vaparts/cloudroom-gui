@@ -3,6 +3,7 @@ import { isLocalPathProjectSource, PERSONAL_PROJECT_ID } from "@cloudroom/domain
 import { COMMAND_TIMEOUT_MS } from "../../constants.js";
 import type { WorkSessionDeps } from "../../types.js";
 import { callHostRetryableOnlineRpc } from "../hosts/online-rpc.js";
+import { runtimeErrorLogFields } from "../lib/error-log-fields.js";
 import {
   getNonDestroyedHostWithStatus,
   requirePublicProject,
@@ -145,10 +146,11 @@ async function inspectGitCheckoutAvailability(
       };
     }
     return { status: "available" };
-  } catch {
-    return {
-      status: "unavailable",
-      message: "This project checkout could not be inspected.",
-    };
+  } catch (error) {
+    deps.logger.warn(
+      { hostId: args.hostId, ...runtimeErrorLogFields(deps.config, error) },
+      "Could not inspect the project checkout; allowing the environment",
+    );
+    return { status: "available" };
   }
 }

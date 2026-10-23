@@ -7,6 +7,7 @@ import { usePathPickerHost } from "@/hooks/useLocalPathPicker";
 import { useSetRootComposeProjectId } from "@/lib/root-compose-selection";
 import { fetchWithAppSurface } from "@/lib/app-surface";
 import { sdk } from "@/lib/sdk";
+import { threadReasoningSaveKey } from "@/hooks/queries/query-keys";
 import { openUrlInExternalBrowser } from "@/lib/url-open-routing";
 import { appToast } from "@/components/ui/app-toast";
 import { getMutationErrorMessage, showMutationErrorToast } from "@/lib/mutation-errors";
@@ -86,7 +87,7 @@ export function cloudFeatureSupported(status: z.infer<typeof cloudroomStatusSche
   const profile = cloudHarness(status, harness);
   return status?.[feature] === true && profile?.[feature] !== false;
 }
-const cloudDiskSchema = z.object({ paused: z.boolean(), reason: z.enum(["disk_capacity", "measurement_unavailable"]), usedBytes: z.number().nullable(), totalBytes: z.number().nullable(), upgrade: z.boolean() });
+const cloudDiskSchema = z.object({ paused: z.boolean(), reason: z.enum(["disk_capacity", "measurement_unavailable"]), usedBytes: z.number().nullable(), totalBytes: z.number().nullable() });
 export type CloudDisk = z.infer<typeof cloudDiskSchema>;
 const threadStatusSchema = z.object({ authRequired: z.boolean().default(false), starting: z.boolean().default(false), sessionId: z.string().nullable(), paused: z.boolean(), failedStart: z.boolean().default(false), model: z.string(), reasoning: reasoningLevelSchema, serviceTier: serviceTierSchema.default("default"), error: z.string().nullable(), reconnecting: z.boolean().default(false), usageLimit: z.boolean().default(false), disk: cloudDiskSchema.nullable().default(null), awake: z.boolean().default(false), pendingDelivery: z.number() }).nullable();
 
@@ -159,7 +160,7 @@ export function useCloudroomThread(threadId: string, enabled: boolean) {
 export function useSetCloudReasoning(threadId: string) {
   const client = useQueryClient();
   return useMutation({
-    mutationKey: ["thread-update", threadId],
+    mutationKey: threadReasoningSaveKey(threadId),
     scope: { id: `thread-update:${threadId}` },
     meta: { errorMessage: "Failed to save thread execution settings." },
     mutationFn: (reasoningLevel: ReasoningLevel) => sdk.threads.update({ threadId, reasoningLevel }),

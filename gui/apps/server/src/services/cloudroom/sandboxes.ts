@@ -8,9 +8,8 @@ import { gzipSync } from "node:zlib";
 import type { HostDaemonContributedEnvEntry } from "@cloudroom/host-daemon-contract";
 import { findCliExecutable } from "@cloudroom/process-utils";
 import { rawThreadIdSchema, reasoningLevelSchema } from "@cloudroom/domain";
-import matter from "gray-matter";
 import { z } from "zod";
-import { hasSupportedFrontmatterDelimiter } from "../skills/injected-skills.js";
+import { hasSupportedFrontmatterDelimiter, parseFrontmatter } from "../skills/injected-skills.js";
 import { macClaudeSignedIn } from "./claude-token.js";
 import { CloudroomConnectionError, CloudroomError } from "./client.js";
 import { macHarnessVersions } from "./harness-versions.js";
@@ -334,7 +333,7 @@ export async function macSkills(): Promise<MacSkill[]> {
     for (const name of await readdir(join(home, root)).catch(() => [])) {
       const file = join(home, root, name, "SKILL.md");
       if (name.startsWith(".") || !await stat(file).then(info => info.isFile(), () => false)) continue;
-      const skill = found.get(name) ?? { name, paths: [], description: await readFile(file, "utf8").then(text => hasSupportedFrontmatterDelimiter(text) ? String(matter(text).data.description ?? "").replace(/\s+/g, " ").trim() : "", () => "") };
+      const skill = found.get(name) ?? { name, paths: [], description: await readFile(file, "utf8").then(text => hasSupportedFrontmatterDelimiter(text) ? String(parseFrontmatter(text).description ?? "").replace(/\s+/g, " ").trim() : "").catch(() => "") };
       skill.paths.push(`${root}/${name}`);
       found.set(name, skill);
     }
@@ -625,14 +624,13 @@ export class SandboxDirectory {
 
   private async checkMode(): Promise<boolean> {
     const value = z.object({
-      sandboxes: z.boolean(), limited: z.boolean().default(false), small_disk: z.boolean().default(false),
+      sandboxes: z.boolean(), limited: z.boolean().default(false),
       queue: z.object({ position: z.number(), total: z.number() }).nullable().default(null), region_blocked: z.boolean().default(false),
       plan: z.string().nullable().default(null),
     }).parse(await this.call({ action: "mode" }));
     this.plan = value.plan;
     this.mode = { on: value.sandboxes, at: Date.now() };
     this.limit = { on: value.limited, at: Date.now() };
-    this.small = value.small_disk;
     this.queue = value.queue || value.region_blocked ? { position: value.queue?.position ?? 0, total: value.queue?.total ?? 0, regionBlocked: value.region_blocked } : null;
     return value.sandboxes;
   }
@@ -670,10 +668,6 @@ export class SandboxDirectory {
     // A plan change shows nothing until the next check, never the old plan's card.
     return this.usage?.value?.plan === this.plan ? this.usage.value : null;
   }
-
-  private small = false;
-  /** Free accounts get 10 GB sandboxes, so a full disk is their moment to upgrade (ADR 0206). Refreshed with usageLimited(). */
-  smallDisk(): boolean { return this.small; }
 
   /** What the account's cloud offers, read by the website from a running spare or sandbox. Null until one runs. */
   async capabilities(): Promise<unknown> {
@@ -732,7 +726,7 @@ export class SandboxDirectory {
 
   /** Saves a thread's title, project name, harness, model, Core session ID, and the thread that started it on the
    *  website (ADR 0182, 0239, 0256). */
-  async label(thread: string, label: { title: string | null; project_name: string | null; session: string; harness: string; model: string | null; parent: string | null }): Promise<void> {
+  async label(thread: string, label: { title: string | null; project_name: string | null; project: string; session: string; harness: string; model: string | null; parent: string | null }): Promise<void> {
     await this.call({ action: "label", thread, ...label });
   }
   async archive(thread: string): Promise<void> { this.forget(thread); await this.call({ action: "archive", thread }); }

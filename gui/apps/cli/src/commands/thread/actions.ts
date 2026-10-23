@@ -47,6 +47,12 @@ interface ThreadUpdateCommandOptions {
   visibility?: string;
 }
 
+interface ThreadMoveCommandOptions {
+  self?: boolean;
+  json?: boolean;
+  project: string;
+}
+
 interface ThreadArchiveCommandOptions {
   self?: boolean;
   json?: boolean;
@@ -266,6 +272,34 @@ export function registerActionsCommands(
           }
         },
       ),
+    );
+
+  parent
+    .command("move [id]")
+    .description(
+      "Move a thread to another project. It keeps its ID and chat, and continues in a fresh session in that project's folder. The old folder stays as it is",
+    )
+    .requiredOption("--project <project>", "Target project ID or name")
+    .option("--self", "Target the current thread (from ROOM_THREAD_ID)")
+    .option("--json", "Print machine-readable JSON output")
+    .action(
+      action(async (id: string | undefined, opts: ThreadMoveCommandOptions) => {
+        const threadId = requireThreadIdOrSelf(id, opts);
+        const sdk = createCliBbSdk(getUrl());
+        const result = await sdk.threads.move({
+          threadId,
+          projectId: opts.project,
+        });
+        if (outputJson(opts, result)) return;
+        console.log(
+          result.moved
+            ? `Thread ${threadId} is in ${opts.project}.`
+            : `Thread ${threadId} moves to ${opts.project} when its current turn ends. End this turn now; the next one runs there.`,
+        );
+        if (result.previousPath) {
+          console.log(`The old folder stays at ${result.previousPath}.`);
+        }
+      }),
     );
 
   parent

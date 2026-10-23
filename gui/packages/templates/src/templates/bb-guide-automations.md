@@ -8,7 +8,7 @@ Loops (formerly Automations) schedule recurring or one-shot work. Agent loops
 run a prompt in a thread; script loops run stored code without model usage.
 `room-cli loop` is the same command as `room-cli automation`.
 
-  room-cli automation list --project <id>
+  room-cli automation list --project <id>    Local and Cloud loops
   room-cli automation show <automationId> --project <id>
   room-cli automation create --project <id> --name <name> <schedule> <execution>
   room-cli automation update <automationId> --project <id> [changes]

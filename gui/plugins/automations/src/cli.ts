@@ -873,7 +873,7 @@ function printRunTable(runs: AutomationRunResponse[]): string {
 function helpText(): string {
   return `Loop commands (room-cli loop is the same command)
 
-room-cli automation list --project <id>
+room-cli automation list --project <id>          Also lists the Cloud loops whose thread is in that project
 room-cli automation create --project <id> --name <name> (--cron <expr> --timezone <tz> | --at <datetime> | --in <duration> | --webhook) (--prompt <text> --provider <id> --model <model> [--reasoning <level>] [--service-tier default|fast] | --script <inline> | --script-file <path> [--host <name-or-id>])
 room-cli automation show <automationId> --project <id>
 room-cli automation update <automationId> --project <id> [--name <name>] [schedule flags] [complete agent/script execution flags | --provider <id> --model <model> --reasoning <level> --service-tier default|fast|none] [--target-thread <id> | --environment <id-or-path> | --new-environment worktree] (target is kept unless one is given)
@@ -893,12 +893,12 @@ A one-time --at/--in run re-prompts the thread; --new-thread gives it a fresh on
 A fresh-thread loop saves the thread's settings, so it keeps running after that thread is archived. Its runs use
 the thread's agent unless --provider, --model, or --reasoning picks another; update changes it.
 A --script/--script-file runs first (60 s), in the loop's own sandbox with fresh threads, else in the thread's:
-no output skips the run, output is added to the prompt.
+no output skips the run (exit 0 or 1; other exit codes fail it, 3 in a row pause it), output is added to the prompt.
 A --webhook loop, Local or Cloud, runs when its secret URL gets a POST: create prints the URL once, and each run gets
 the requests that arrived as data. Cloud runs start within seconds; this Mac checks for Local ones about once a minute,
 and they wait while it is off. A Local webhook loop an agent creates starts paused: a person turns it on in Loops.
 room-cli automation create --cloud --thread <cloudThreadId> --name <name> --prompt <text> (--cron <expr> --timezone <tz> | --at <datetime> | --in <duration> | --webhook) [--new-thread | --same-thread] [--script <inline> | --script-file <path>] [--provider <id>] [--model <model>] [--reasoning <level>]
-room-cli automation list --cloud [--thread <cloudThreadId>]
+room-cli automation list --cloud [--thread <cloudThreadId>]   All Cloud loops, in every project
 room-cli automation show|pause|resume|run|hook <cloudAutomationId>
 room-cli automation update <cloudAutomationId> [--name <name>] [--prompt <text>] [schedule flags] [--script <inline> | --script-file <path> | --no-script] [--provider <id>] [--model <model>] [--reasoning <level>]
 room-cli automation delete <cloudAutomationId> --yes
@@ -930,6 +930,16 @@ function printCloudAutomation(a: CloudAutomation): string {
   const mode = `${a.new_thread ? "new thread per run" : "re-prompts"}${a.script ? " · script" : ""}`;
   const agent = a.agent ? `\n  Agent: ${a.agent.provider} · ${a.agent.model ?? "default model"}${a.agent.reasoning ? ` · ${a.agent.reasoning}` : ""}` : "";
   return `${a.id}  ${a.name}\n  Cloud thread ${a.thread_id} · ${mode} · ${schedule} · ${state} · ${a.runs} runs${agent}${a.last_error ? `\n  Last error: ${a.last_error}` : ""}\n${a.url ? webhookNote(a.url) : ""}`;
+}
+
+async function projectCloudAutomations(bb: Pick<BbPluginApi, "sdk">, projectId: string): Promise<CloudAutomation[]> {
+  const { automations = [] } = await bb.sdk.cloudroom.automations({ action: "list" });
+  const threadIds = [...new Set(automations.map((a) => a.thread_id))];
+  const projects = new Map(await Promise.all(threadIds.map(async (threadId) => {
+    const thread = await bb.sdk.threads.get({ threadId }).catch(() => null);
+    return [threadId, thread && "projectId" in thread ? thread.projectId : null] as const;
+  })));
+  return automations.filter((a) => projects.get(a.thread_id) === projectId);
 }
 
 /** The agent a fresh-thread cloud loop runs, when --provider, --model, or --reasoning picks one. */
@@ -1056,7 +1066,7 @@ export function registerAutomationCli(args: {
     commands: [
       {
         name: "list",
-        summary: "List loops for a project",
+        summary: "List a project's Local and Cloud loops",
         usage: "room-cli automation list --project <id> [--json]",
       },
       {
@@ -1126,17 +1136,28 @@ export function registerAutomationCli(args: {
         if (isCloudCommand(parsed)) return await runCloudCommand(bb, parsed, ctx);
         if (command === "review") return await runReviewCommand(service, parsed);
         if (command === "list") {
-          const result = service.list({
-            projectId: requireFlag(parsed, "project"),
-          });
-          const json = optionalJson(parsed, result);
+          const projectId = requireFlag(parsed, "project");
+          const result = service.list({ projectId });
+          const cloud = await projectCloudAutomations(bb, projectId).then(
+            (automations) => ({ automations, error: "" }),
+            (error: unknown) => ({
+              automations: [],
+              error: `Cloud loops unavailable: ${error instanceof Error ? error.message : String(error)}\n`,
+            }),
+          );
+          const json = optionalJson(parsed, [
+            ...result,
+            ...cloud.automations.map((automation) => ({ ...automation, cloud: true })),
+          ]);
+          const text =
+            (result.length === 0 ? "" : printAutomationTable(result)) +
+            (cloud.automations.length === 0
+              ? ""
+              : `Cloud loops\n${cloud.automations.map(printCloudAutomation).join("")}`);
           return {
             exitCode: 0,
-            stdout:
-              json ??
-              (result.length === 0
-                ? "No loops found\n"
-                : printAutomationTable(result)),
+            stdout: json ?? (text || (cloud.error ? "" : "No loops found\n")),
+            ...(cloud.error ? { stderr: cloud.error } : {}),
           };
         }
         if (command === "create") {

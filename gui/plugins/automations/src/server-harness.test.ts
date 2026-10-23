@@ -38,6 +38,7 @@ const rpcMethods = [
   "automations_review_mark",
   "automations_link_thread",
   "cloud_automations",
+  "cloud_template_add",
 ].sort();
 
 function project(projectId = PROJECT_ID) {

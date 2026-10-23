@@ -8,6 +8,8 @@ import {
   type ReactNode,
 } from "react";
 import { useSetAtom } from "jotai";
+import { useQueryClient } from "@tanstack/react-query";
+import { getCachedLiveThreadDescendants } from "@/hooks/cache-owners/thread-archive-cache";
 import { appToast } from "@/components/ui/app-toast";
 import {
   closePanesForThreadsAtom,
@@ -44,7 +46,10 @@ import {
 } from "@/components/dialogs/ConfirmDeleteDialog";
 import { ArchivedThreadToastDescription } from "@/components/thread/ArchivedThreadToastDescription";
 import { destroyPersistedBrowserViewsForThread } from "@/components/secondary-panel/browserViewVisibilityCoordinator";
-import { getThreadReadToggleAction } from "@cloudroom/client-core";
+import {
+  getThreadReadToggleAction,
+  isThreadRunning,
+} from "@cloudroom/client-core";
 import { getRootComposeRoutePath, getThreadRoutePath } from "@/lib/route-paths";
 import { getDesktopBrowserApi } from "@/lib/bb-desktop";
 import { useRouteNavigate } from "@/components/ui/app-route-anchor";
@@ -125,6 +130,7 @@ export function ThreadActionsProvider({
   children,
 }: ThreadActionsProviderProps) {
   const navigate = useRouteNavigate();
+  const queryClient = useQueryClient();
   const { threadId: viewedThreadId } = useRouteState();
   const viewedThreadIdRef = useRef(viewedThreadId);
   const openedSectionTargetsRef = useRef<{
@@ -343,44 +349,48 @@ export function ThreadActionsProvider({
 
   const performArchive = useCallback(
     (thread: Thread) => {
-      const sectionTargets = getSidebarSectionTargets(thread.id);
+      const archivedThreadIds = new Set([
+        thread.id,
+        ...getCachedLiveThreadDescendants(queryClient, thread.id).map(
+          (descendant) => descendant.id,
+        ),
+      ]);
       const opened = openedSectionTargetsRef.current;
       const openedTargets =
         opened?.threadId === thread.id ? opened.targets : [];
+      const navigateAwayIfArchived = () => {
+        const viewed = viewedThreadIdRef.current;
+        if (!viewed || !archivedThreadIds.has(viewed)) return;
+        const listedThreadIds = new Set(
+          getSidebarThreadNavigationTargets(document.body).map(
+            (target) => target.threadId,
+          ),
+        );
+        const isAvailable = (target: SidebarThreadShortcutTarget) =>
+          !archivedThreadIds.has(target.threadId) &&
+          listedThreadIds.has(target.threadId);
+        const fallback =
+          findArchiveFallback(openedTargets, thread.id, isAvailable) ??
+          findArchiveFallback(
+            getSidebarSectionTargets(thread.id),
+            thread.id,
+            isAvailable,
+          );
+        navigate(
+          fallback
+            ? getThreadRoutePath({
+                projectId: fallback.projectId ?? thread.projectId,
+                threadId: fallback.threadId,
+              })
+            : getRootComposeRoutePath(),
+        );
+      };
+      syncNavigationAfterClose(
+        closePanesForThreads([...archivedThreadIds]),
+        navigateAwayIfArchived,
+      );
       archiveThreadAndChildrenMutateAsync({ id: thread.id }).then(
         (response) => {
-          const navigateAwayIfArchived = () => {
-            const viewed = viewedThreadIdRef.current;
-            if (!viewed || !response.archivedThreadIds.includes(viewed)) return;
-            const listedThreadIds = new Set(
-              getSidebarThreadNavigationTargets(document.body).map(
-                (target) => target.threadId,
-              ),
-            );
-            const isAvailable = (target: SidebarThreadShortcutTarget) =>
-              !response.archivedThreadIds.includes(target.threadId) &&
-              listedThreadIds.has(target.threadId);
-            const fallback =
-              findArchiveFallback(openedTargets, thread.id, isAvailable) ??
-              findArchiveFallback(
-                sectionTargets,
-                thread.id,
-                (target) =>
-                  !response.archivedThreadIds.includes(target.threadId),
-              );
-            navigate(
-              fallback
-                ? getThreadRoutePath({
-                    projectId: fallback.projectId ?? thread.projectId,
-                    threadId: fallback.threadId,
-                  })
-                : getRootComposeRoutePath(),
-            );
-          };
-          syncNavigationAfterClose(
-            closePanesForThreads(response.archivedThreadIds),
-            navigateAwayIfArchived,
-          );
           const toastId = `thread-archived-${thread.id}`;
           appToast.success("Archived", {
             compact: true,
@@ -424,6 +434,7 @@ export function ThreadActionsProvider({
       archiveThreadAndChildrenMutateAsync,
       closePanesForThreads,
       navigate,
+      queryClient,
       syncNavigationAfterClose,
       unarchiveMutate,
     ],
@@ -431,19 +442,17 @@ export function ThreadActionsProvider({
 
   const archiveThreadAndChildrenAction = useCallback(
     (thread: Thread) => {
-      sdk.threads.childSummary({ threadId: thread.id }).then(
-        (summary) => {
-          const runningThreadCount = summary?.runningThreadCount ?? 0;
-          if (runningThreadCount > 0) {
-            openArchiveConfirm({ thread, runningThreadCount });
-            return;
-          }
-          performArchive(thread);
-        },
-        () => performArchive(thread),
-      );
+      const runningThreadCount = [
+        thread,
+        ...getCachedLiveThreadDescendants(queryClient, thread.id),
+      ].filter(isThreadRunning).length;
+      if (runningThreadCount > 0) {
+        openArchiveConfirm({ thread, runningThreadCount });
+        return;
+      }
+      performArchive(thread);
     },
-    [openArchiveConfirm, performArchive],
+    [openArchiveConfirm, performArchive, queryClient],
   );
 
   const confirmArchive = useCallback(() => {

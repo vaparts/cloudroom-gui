@@ -90,12 +90,18 @@ function compareByLatestAttentionAtDescending(
   return compareByCreatedAtDescending(left, right);
 }
 
+export function isThreadRunning(
+  thread: Pick<ThreadListEntry, "status">,
+): boolean {
+  return thread.status === "active" || thread.status === "starting";
+}
+
 export function compareStandardThreads(
   left: ThreadListEntry,
   right: ThreadListEntry,
 ): number {
-  const leftIsActive = left.status === "active";
-  const rightIsActive = right.status === "active";
+  const leftIsActive = isThreadRunning(left);
+  const rightIsActive = isThreadRunning(right);
 
   if (leftIsActive !== rightIsActive) {
     return leftIsActive ? -1 : 1;

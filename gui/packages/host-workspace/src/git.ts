@@ -897,6 +897,16 @@ export async function getWorkspaceGitOperation(
   cwd: string,
   options: GitProcessOptions = {},
 ): Promise<WorkspaceGitOperation> {
+  return (await readWorkspaceGitState(cwd, options)).operation;
+}
+
+export async function readWorkspaceGitState(
+  cwd: string,
+  options: GitProcessOptions = {},
+): Promise<{
+  hasUncommittedChanges: boolean;
+  operation: WorkspaceGitOperation;
+}> {
   await ensureGitRepo(cwd, options);
 
   const [gitDir, status] = await Promise.all([
@@ -915,10 +925,12 @@ export async function getWorkspaceGitOperation(
     parsePorcelainEntries(status.stdout),
   );
   const marker = await findWorkspaceGitOperationMarker(gitDir);
-  if (!marker) {
-    return { kind: "none" };
-  }
-  return buildActiveWorkspaceGitOperation(marker.kind, hasConflicts);
+  return {
+    hasUncommittedChanges: status.stdout.trim().length > 0,
+    operation: marker
+      ? buildActiveWorkspaceGitOperation(marker.kind, hasConflicts)
+      : { kind: "none" },
+  };
 }
 
 interface NameStatusEntry {

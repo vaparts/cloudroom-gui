@@ -39,7 +39,6 @@
     "@cloudroom/tunnel-contract": "workspace:*",
     "@hono/node-server": "^1.19.11",
     "@parcel/watcher": "2.5.6",
-    "gray-matter": "^4.0.3",
     "mime-types": "^3.0.2",
     "node-pty": "1.2.0-beta.15",
     "p-retry": "^6.2.1",
@@ -50,6 +49,7 @@
     "proper-lockfile": "^4.1.2",
     "semver": "^7.7.4",
     "ws": "^8.19.0",
+    "yaml": "^2.9.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {

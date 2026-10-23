@@ -9,10 +9,9 @@ import {
   fetchRemoteBranches,
   getCheckoutRef,
   getGitCommonDir,
-  getWorkspaceGitOperation,
-  hasUncommittedChanges,
   listBranchRefsWithDefaults,
   readDefaultBranchRefs,
+  readWorkspaceGitState,
   type GitProcessOptions,
   withGitRefMutationLock,
 } from "@cloudroom/host-workspace";
@@ -279,20 +278,16 @@ export async function inspectHostGitSource(
     ).catch(() => undefined);
   }
 
-  const [checkout, defaultRefs, dirty, operation, isWorktree] =
-    await Promise.all([
-      getCheckoutRef(command.path, gitProcessOptions),
-      readDefaultBranchRefs(command.path, gitProcessOptions),
-      repoKind === "work-tree"
-        ? hasUncommittedChanges(command.path, gitProcessOptions)
-        : false,
-      repoKind === "work-tree"
-        ? getWorkspaceGitOperation(command.path, gitProcessOptions)
-        : NO_GIT_OPERATION,
-      repoKind === "work-tree"
-        ? detectLinkedWorktree(command.path, gitProcessOptions)
-        : false,
-    ]);
+  const [checkout, defaultRefs, state, isWorktree] = await Promise.all([
+    getCheckoutRef(command.path, gitProcessOptions),
+    readDefaultBranchRefs(command.path, gitProcessOptions),
+    repoKind === "work-tree"
+      ? readWorkspaceGitState(command.path, gitProcessOptions)
+      : { hasUncommittedChanges: false, operation: NO_GIT_OPERATION },
+    repoKind === "work-tree"
+      ? detectLinkedWorktree(command.path, gitProcessOptions)
+      : false,
+  ]);
   const defaultBranch = defaultRefs.defaultBranch;
   const originDefaultBranch = defaultRefs.originDefaultBranch;
   return {
@@ -300,8 +295,8 @@ export async function inspectHostGitSource(
     defaultBranch: defaultBranch ?? null,
     defaultBranchRelation: defaultRefs.defaultBranchRelation ?? null,
     isWorktree,
-    hasUncommittedChanges: dirty,
-    operation,
+    hasUncommittedChanges: state.hasUncommittedChanges,
+    operation: state.operation,
     originDefaultBranch: originDefaultBranch ?? null,
   };
 }

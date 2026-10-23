@@ -2,17 +2,19 @@ import type { Dirent } from "node:fs";
 import fs from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
-import matter from "gray-matter";
 import type { HostDaemonInjectedSkillSource } from "@cloudroom/host-daemon-contract";
+import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import type { ServerLogger } from "../../types.js";
 import { isFsErrorWithCode } from "../lib/fs-errors.js";
+import { isRecord } from "./registry-parse.js";
 import { REGISTRY_SKILL_PROVENANCE_FILE_NAME } from "./registry-skill-provenance.js";
 import { readSharedBuiltinSkillNames } from "./builtin-skills-copy.js";
 
 const SKILL_FILE_NAME = "SKILL.md";
 const SKILL_NAME_PATTERN = /^(?!.*--)[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/u;
 const SKILL_FRONTMATTER_DELIMITER = "---";
+const FRONTMATTER_PATTERN = /^\uFEFF?---([\s\S]*?)(?:\r?\n---|$)/u;
 
 const skillFrontmatterSchema = z
   .object({
@@ -171,13 +173,18 @@ function compactZodIssues(issues: z.ZodIssue[]): string {
     .join("; ");
 }
 
-// gray-matter runs JavaScript for `---js` frontmatter; only plain YAML `---` is safe to parse.
 export function hasSupportedFrontmatterDelimiter(content: string): boolean {
   const trimmed = content.trimStart();
   return (
     trimmed.startsWith(`${SKILL_FRONTMATTER_DELIMITER}\n`) ||
     trimmed.startsWith(`${SKILL_FRONTMATTER_DELIMITER}\r\n`)
   );
+}
+
+export function parseFrontmatter(content: string): Record<string, unknown> {
+  const yaml = FRONTMATTER_PATTERN.exec(content)?.[1];
+  const data: unknown = yaml === undefined ? {} : parseYaml(yaml);
+  return isRecord(data) ? data : {};
 }
 
 function logInvalidSkill(args: InvalidSkillLogArgs): void {
@@ -330,7 +337,7 @@ function readSkillCandidate(
 
   let parsed;
   try {
-    parsed = matter(content);
+    parsed = parseFrontmatter(content);
   } catch (error) {
     logInvalidSkill({
       ...args,
@@ -342,7 +349,7 @@ function readSkillCandidate(
     return null;
   }
 
-  const frontmatter = skillFrontmatterSchema.safeParse(parsed.data);
+  const frontmatter = skillFrontmatterSchema.safeParse(parsed);
   if (!frontmatter.success) {
     logInvalidSkill({
       ...args,
@@ -401,7 +408,7 @@ export function resolveProjectSkillSourceFromContent(
 
   let parsed;
   try {
-    parsed = matter(args.content);
+    parsed = parseFrontmatter(args.content);
   } catch (error) {
     logInvalidSkill({
       candidatePath: args.candidatePath,
@@ -415,7 +422,7 @@ export function resolveProjectSkillSourceFromContent(
     return null;
   }
 
-  const frontmatter = skillFrontmatterSchema.safeParse(parsed.data);
+  const frontmatter = skillFrontmatterSchema.safeParse(parsed);
   if (!frontmatter.success) {
     logInvalidSkill({
       candidatePath: args.candidatePath,

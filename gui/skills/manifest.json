@@ -6,6 +6,7 @@
     "decisions",
     "file-tree",
     "self-archive",
-    "browser-harness"
+    "browser-harness",
+    "create-loop"
   ]
 }

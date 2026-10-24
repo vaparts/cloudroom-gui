@@ -1,4 +1,4 @@
-import { nanoid } from "nanoid";
+import { randomId } from "./random-id";
 import {
   buildFixedPanelTabId,
   isFixedPanelTabsStateStorageKey,
@@ -58,7 +58,7 @@ export function createBrowserFixedPanelTab({
   environmentId,
   url,
 }: CreateBrowserFixedPanelTabArgs): BrowserFixedPanelTab {
-  const browserInstanceId = nanoid();
+  const browserInstanceId = randomId();
   return {
     environmentId,
     id: buildFixedPanelTabId({

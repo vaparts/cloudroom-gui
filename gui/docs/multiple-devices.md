@@ -134,8 +134,8 @@ same list, plus a custom URL. When you pick another Mac, the app stops starting
 a server on this Mac.
 
 The app remembers the pick and opens that Mac on every launch. If it doesn't
-answer within 5 seconds, the app opens this Mac instead and shows a banner. When
-the other Mac comes back online, the banner offers Switch.
+answer, the app keeps trying for 30 seconds, then opens this Mac instead and
+shows a banner. When the other Mac comes back online, the banner offers Switch.
 
 The app keeps this Mac's Connect key, encrypted with the OS keychain, so it can
 open another Mac without starting its own server. It gets the key from the local

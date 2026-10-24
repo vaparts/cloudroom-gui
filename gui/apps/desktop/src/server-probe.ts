@@ -221,17 +221,33 @@ export async function probeBbServer(
   };
 }
 
+// Node's clocks keep running while a Mac sleeps. A gap far longer than one poll round means the
+// Mac slept mid-startup, so that gap does not count toward the startup timeout.
+const MAX_AWAKE_POLL_GAP_MS = 10_000;
+
+function createAwakeTimeout(timeoutMs: number): () => boolean {
+  let awakeMs = 0;
+  let last = performance.now();
+  return () => {
+    const now = performance.now();
+    const gap = now - last;
+    last = now;
+    if (gap <= MAX_AWAKE_POLL_GAP_MS) awakeMs += gap;
+    return awakeMs > timeoutMs;
+  };
+}
+
 export async function waitForCompatibleServer(
   args: WaitForCompatibleServerArgs,
 ): Promise<ServerProbeResult> {
-  const deadline = Date.now() + args.timeoutMs;
+  const timedOut = createAwakeTimeout(args.timeoutMs);
   let lastResult: ServerProbeResult = {
     kind: "unavailable",
     reason: "Probe has not started",
     serverUrl: args.serverUrl,
   };
 
-  while (Date.now() <= deadline) {
+  while (!timedOut()) {
     lastResult = await probeBbServer({
       ...(args.fetchImpl === undefined ? {} : { fetchImpl: args.fetchImpl }),
       serverUrl: args.serverUrl,

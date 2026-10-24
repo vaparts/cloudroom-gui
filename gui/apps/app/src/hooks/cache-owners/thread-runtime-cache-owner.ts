@@ -1,5 +1,5 @@
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
-import { nanoid } from "nanoid";
+import { randomId } from "@/lib/random-id";
 import type {
   PromptHistoryEntry,
   ResolvedThreadExecutionOptions,
@@ -289,7 +289,7 @@ function buildAcceptedPromptHistoryEntry({
   input,
 }: BuildAcceptedPromptHistoryEntryArgs): PromptHistoryEntry {
   return {
-    id: `optimistic-prompt-history:${nanoid()}`,
+    id: `optimistic-prompt-history:${randomId()}`,
     createdAt,
     input,
   };
@@ -338,7 +338,7 @@ function buildOptimisticQueuedMessage({
       : null;
 
   return {
-    id: `optimistic-queued-${nanoid()}`,
+    id: `optimistic-queued-${randomId()}`,
     initiator: "user",
     senderThreadId: null,
     threadId: request.id,
@@ -583,7 +583,7 @@ function buildOptimisticUserMessageRow({
   threadId,
   threadStatus,
 }: BuildOptimisticUserMessageRowParams): TimelineRow {
-  const id = `${OPTIMISTIC_TIMELINE_ROW_ID_PREFIX}${nanoid()}`;
+  const id = `${OPTIMISTIC_TIMELINE_ROW_ID_PREFIX}${randomId()}`;
   const text = input
     .filter(
       (entry): entry is Extract<typeof entry, { type: "text" }> =>

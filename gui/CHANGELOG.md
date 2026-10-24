@@ -2,18 +2,29 @@
 
 Also on [cloudroom.dev/changelog](https://www.cloudroom.dev/changelog).
 
-## 118
+## 119
 
-Cloud loop templates (2026-10-23)
+Steadier starts after sleep (2026-10-23)
 
 ### Changes
 
-- Templates now make Cloud loops by default, with a Cloud | Local switch.
-- Local and Cloud loops now open the same loop dialog.
-- Loops added from a template keep the template's priority.
-- The loop dialog keeps your unsaved edits when new runs arrive.
-- Template cards are easier to read, and long repo paths no longer hide names.
-- Cloud agents now recognize when a command was killed for running out of memory.
+- Threads no longer time out on startup when your Mac was asleep.
+- Phone and Mac-to-Mac connections drop less often and retry before giving up.
+- fx shows its full model list again, and Cloud fx threads can use Max effort.
+- The right-click menu no longer closes instantly near the bottom of the sidebar.
+- Security fixes.
+
+## 118
+
+One dialog for every loop (2026-10-23)
+
+### Changes
+
+- Add a loop as a Cloud loop that keeps running while your Mac is off, or switch it to Local.
+- Local loops now open the same dialog as Cloud loops, with their run logs and scripts.
+- "Project default" is now called "Fresh copy of main", so you know where each run starts.
+- Edits in an open loop no longer disappear when a new run comes in, and Fast mode now saves.
+- Cloud agents now know when a command ran out of memory, instead of guessing why it stopped.
 
 ## 117
 

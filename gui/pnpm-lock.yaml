@@ -218,9 +218,6 @@ importers:
       mermaid:
         specifier: ^11.15.0
         version: 11.15.0
-      nanoid:
-        specifier: ^5.1.6
-        version: 5.1.6
       partysocket:
         specifier: ^1.1.16
         version: 1.1.16(react@19.2.4)
@@ -1318,9 +1315,6 @@ importers:
       drizzle-orm:
         specifier: ^0.38.0
         version: 0.38.4(@cloudflare/workers-types@4.20260702.1)(@opentelemetry/api@1.9.1)(@types/better-sqlite3@7.6.13)(@types/react@19.2.13)(better-sqlite3@12.10.0)(kysely@0.29.3)(react@19.2.4)
-      nanoid:
-        specifier: ^5.0.9
-        version: 5.1.6
     devDependencies:
       '@cloudroom/tsconfig':
         specifier: workspace:*
@@ -10252,11 +10246,6 @@ packages:
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
 
-  nanoid@5.1.6:
-    resolution: {integrity: sha512-c7+7RQ+dMB5dPwwCp4ee1/iV/q2P6aK1mTZcfr1BTuVlyW9hJYiMPybJCcnBlQtuSmTIWNeazm/zqNoZSSElBg==}
-    engines: {node: ^18 || >=20}
-    hasBin: true
-
   nanostores@1.2.0:
     resolution: {integrity: sha512-F0wCzbsH80G7XXo0Jd9/AVQC7ouWY6idUCTnMwW5t/Rv9W8qmO6endavDwg7TNp5GbugwSukFMVZqzPSrSMndg==}
     engines: {node: ^20.0.0 || >=22.0.0}
@@ -18229,8 +18218,6 @@ snapshots:
     optional: true
 
   nanoid@3.3.18: {}
-
-  nanoid@5.1.6: {}
 
   nanostores@1.2.0: {}
 

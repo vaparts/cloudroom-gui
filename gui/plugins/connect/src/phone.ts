@@ -57,18 +57,16 @@ export class PhoneRelay {
     this.signedIn = accountId !== null;
     if (accountId === null) {
       const signedOut = this.tunnel.getCredential();
-      if (signedOut !== null) {
-        // Retire the key on the relay too, so no saved copy can still reach the account's other Macs.
-        await this.bb.storage.kv.set(RETIRE_KV_KEY, signedOut);
-        await this.tunnel.forget();
-        await this.retirePending();
-      }
+      if (signedOut !== null) await this.retire(signedOut);
       return;
     }
     const registeredFor = await this.bb.storage.kv.get<string>(ACCOUNT_KV_KEY);
     if (!force && registeredFor === accountId && this.tunnel.getCredential() !== null) {
       return;
     }
+    // Another account's key goes first, so that account's phones lose this Mac even if registering fails.
+    const previous = registeredFor !== accountId ? this.tunnel.getCredential() : null;
+    if (previous !== null) await this.retire(previous);
     const registration = await this.bb.sdk.cloudroom.connectRegister();
     await this.bb.storage.kv.set(ACCOUNT_KV_KEY, registration.accountId);
     await this.tunnel.useCredential({
@@ -76,6 +74,13 @@ export class PhoneRelay {
       handle: registration.handle,
       credential: registration.credential,
     });
+  }
+
+  /** Retires the key on the relay too, so no saved copy can still reach the account's other Macs. */
+  private async retire(credential: NonNullable<ReturnType<ConnectTunnel["getCredential"]>>): Promise<void> {
+    await this.bb.storage.kv.set(RETIRE_KV_KEY, credential);
+    await this.tunnel.forget();
+    await this.retirePending();
   }
 
   /** Offline, the key stays saved and the next check retries; only network errors and relay outages keep it. */

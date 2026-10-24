@@ -347,6 +347,9 @@ describe("acp configOptions model catalog", () => {
 
     expect(findAcpModelConfigOption([byId, byCategory])).toBe(byCategory);
     expect(findAcpModelConfigOption([byId])).toBe(byId);
+
+    const fxModel = { ...byCategory, id: "model" };
+    expect(findAcpModelConfigOption([byCategory, fxModel])).toBe(fxModel);
   });
 
   it("maps model configOptions values, names, and currentValue into picker models", () => {

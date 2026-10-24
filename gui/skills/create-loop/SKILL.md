@@ -13,6 +13,7 @@ The user describes the job in a sentence. Fill in everything else from the defau
 - **Agent:** the same harness, model, and effort as this thread (`room-cli thread show --self --json`).
 - **Where:** a Local loop in the project's main checkout (first line of `git worktree list`). No new worktrees. Use a Cloud loop when it must run with the Mac off, and always from a Cloud thread.
 - **Access:** read only. No edits, commits, or pushes until the user approves a fix.
+- **Safety:** include the safety sentence below verbatim in every Local or Cloud loop prompt, including prompts embedded in scripts.
 - **Finish:** all fine → 1-2 lines, then the thread archives itself. Something matters → a short verdict, thread left open for the user's Review tab.
 - **No repeats:** skip issues already reported in open threads with the same title.
 
@@ -36,6 +37,7 @@ The user describes the job in a sentence. Fill in everything else from the defau
 
 ```text
 <Name>. Read only: do not edit, commit, or push anything.
+Never test destructive edge cases on live services; mock the API and reject missing or empty IDs before delete requests.
 
 1. Rename this thread: `room-cli thread update --self --title "<Name> · $(date '+%b-%d %H:%M')"`.
 2. Read: <concrete files and docs>.

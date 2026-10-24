@@ -95,6 +95,7 @@ import {
   fetchRelayCredential,
   isRelayUrl,
   listComputers,
+  OPEN_RETRY_MS,
   openComputer,
   relayCookieOrigins,
   RELAY_CREDENTIAL_FILE_NAME,
@@ -1281,17 +1282,26 @@ async function clearRelayCredential(): Promise<void> {
 }
 
 async function openRelayComputer(handle: string, isCurrent: () => boolean): Promise<boolean> {
-  // A second try covers a key the Connect plugin replaced since this app saved it.
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  const giveUpAt = Date.now() + OPEN_RETRY_MS;
+  let retryDelayMs = 1_000;
+  let credentialRetried = false;
+  for (;;) {
     const credential = await getRelayCredential(true);
     if (credential === null || !isCurrent()) return false;
     const opened = await openComputer(credential, handle, session.defaultSession.cookies);
     if (opened.ok) return isCurrent() && (await loadRemoteServerTarget(opened.value, isCurrent));
     desktopLogger.info(`[desktop] could not open Mac ${handle} (${opened.reason})`);
-    if (opened.reason !== "unauthorized") return false;
-    await clearRelayCredential();
+    if (opened.reason === "unauthorized") {
+      // One more try covers a key the Connect plugin replaced since this app saved it.
+      if (credentialRetried) return false;
+      credentialRetried = true;
+      await clearRelayCredential();
+      continue;
+    }
+    if (Date.now() + retryDelayMs > giveUpAt) return false;
+    await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+    retryDelayMs = Math.min(retryDelayMs * 2, 8_000);
   }
-  return false;
 }
 
 /** Opens one of your Macs in this window; null or this Mac's handle means this Mac. */

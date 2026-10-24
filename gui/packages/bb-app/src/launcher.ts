@@ -2145,17 +2145,33 @@ async function isHealthyServerAnswering(url: string): Promise<boolean> {
   }
 }
 
+// Node's clocks keep running while a Mac sleeps. A gap far longer than one poll round means the
+// Mac slept mid-startup, so that gap does not count toward the startup timeout.
+const MAX_AWAKE_POLL_GAP_MS = 10_000;
+
+function createAwakeTimeout(timeoutMs: number): () => boolean {
+  let awakeMs = 0;
+  let last = performance.now();
+  return () => {
+    const now = performance.now();
+    const gap = now - last;
+    last = now;
+    if (gap <= MAX_AWAKE_POLL_GAP_MS) awakeMs += gap;
+    return awakeMs > timeoutMs;
+  };
+}
+
 export async function waitForServerHealth(
   args: WaitForServerHealthArgs,
 ): Promise<void> {
   const timeoutMs = args.timeoutMs ?? HEALTH_CHECK_TIMEOUT_MS;
-  const deadline = Date.now() + timeoutMs;
+  const timedOut = createAwakeTimeout(timeoutMs);
   let foreignServerAnswered = false;
   const describeFailure = (reason: string): string =>
     foreignServerAnswered
       ? `${reason}: another server is already answering at ${args.url}`
       : reason;
-  while (Date.now() <= deadline) {
+  while (!timedOut()) {
     if (args.childProcess && hasProcessExited(args.childProcess)) {
       throw new Error(
         describeFailure("Process exited before becoming healthy"),
@@ -2190,13 +2206,13 @@ export async function waitForHostDaemonStatus(
   args: WaitForHostDaemonStatusArgs,
 ): Promise<void> {
   const timeoutMs = args.timeoutMs ?? HEALTH_CHECK_TIMEOUT_MS;
-  const deadline = Date.now() + timeoutMs;
+  const timedOut = createAwakeTimeout(timeoutMs);
   const expectedServerUrl = normalizeServerUrlForComparison(
     args.expectedServerUrl,
   );
   const statusUrl = `http://${BB_LOOPBACK_HOST}:${args.port}/status`;
 
-  while (Date.now() <= deadline) {
+  while (!timedOut()) {
     if (args.childProcess && hasProcessExited(args.childProcess)) {
       throw new Error("Host daemon exited before becoming ready");
     }

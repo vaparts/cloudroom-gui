@@ -21,14 +21,17 @@ export interface Env {
 
 const TUNNEL_TAG = "tunnel";
 const RESP_HEAD_TIMEOUT_MS = 30_000;
-const PRESENCE_INTERVAL_MS = 50_000;
 /** The Mac pings every 10s. A sleeping Mac's socket can still look open for minutes, so a silent one is gone. */
 const HEARTBEAT_STALE_MS = 30_000;
 
 const WS_READY_STATE_OPEN = 1;
 
-/** Saved on the Mac's tunnel socket, for the heartbeat check and logs. */
-type TunnelInfo = { connectedAt?: number; mac?: string };
+/** Saved on the Mac's tunnel socket, never in Durable Object storage: a storage hiccup resets the object and drops the Mac. */
+type TunnelInfo = { connectedAt?: number; mac?: string; serverId?: string; protocolVersion?: number };
+
+function tunnelInfo(ws: WebSocket): TunnelInfo {
+  return (ws.deserializeAttachment() as TunnelInfo | null) ?? {};
+}
 
 export const TUNNEL_OFFLINE_HEADER = "x-bb-tunnel-offline";
 
@@ -80,7 +83,6 @@ interface PendingHttp {
 export class TunnelDO {
   private readonly pendingHttp = new Map<number, PendingHttp>();
   private nextStreamId: number;
-  private clientProtocolVersion = 0;
 
   constructor(
     private readonly state: DurableObjectState,
@@ -98,16 +100,6 @@ export class TunnelDO {
     this.state.setWebSocketAutoResponse(
       new WebSocketRequestResponsePair(HEARTBEAT_REQUEST, HEARTBEAT_RESPONSE),
     );
-    this.state.blockConcurrencyWhile(async () => {
-      const stored = await this.state.storage.get<number>("protocolVersion");
-      if (
-        typeof stored === "number" &&
-        Number.isFinite(stored) &&
-        stored >= 0
-      ) {
-        this.clientProtocolVersion = stored;
-      }
-    });
   }
 
   fetch(request: Request): Response | Promise<Response> {
@@ -124,9 +116,6 @@ export class TunnelDO {
     if (url.pathname === "/__control/close") {
       for (const ws of this.state.getWebSockets(TUNNEL_TAG))
         ws.close(1000, "revoked by owner");
-      void this.state.storage.delete("serverId");
-      void this.state.storage.delete("protocolVersion");
-      this.clientProtocolVersion = 0;
       return new Response(null, { status: 204 });
     }
     if (url.pathname === "/__control/status") {
@@ -146,7 +135,7 @@ export class TunnelDO {
     }
 
     const target = readTunnelTarget(request.headers);
-    if (target !== undefined && this.clientProtocolVersion < 1) {
+    if (target !== undefined && (tunnelInfo(tunnel).protocolVersion ?? 0) < 1) {
       return new Response(`cloudroom: ${PORT_SHARE_TOO_OLD}\n`, {
         status: 502,
         headers: { "content-type": "text/plain; charset=utf-8" },
@@ -161,7 +150,7 @@ export class TunnelDO {
           return new Response("Sign in required\n", { status: 401 });
         }
         try {
-          const serverId = await this.state.storage.get<string>("serverId");
+          const { serverId } = tunnelInfo(tunnel);
           if (machineId) {
             if (target !== undefined || (await machineOwner(this.env.DB, machineId)) !== serverId) {
               return new Response("Machine not authorized\n", { status: 403 });
@@ -190,7 +179,7 @@ export class TunnelDO {
     for (let i = sockets.length - 1; i >= 0; i--) {
       const ws = sockets[i];
       if (ws.readyState !== WS_READY_STATE_OPEN) continue;
-      const { connectedAt = 0, mac } = (ws.deserializeAttachment() as TunnelInfo | null) ?? {};
+      const { connectedAt = 0, mac } = tunnelInfo(ws);
       const lastPing = this.state.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? 0;
       const silentMs = Date.now() - Math.max(connectedAt, lastPing);
       if (silentMs <= HEARTBEAT_STALE_MS) return ws;
@@ -227,24 +216,16 @@ export class TunnelDO {
     );
   }
 
-  private async markPresence(): Promise<void> {
-    const serverId = await this.state.storage.get<string>("serverId");
+  /** "Last online" for the offline page, written when the Mac connects and when it drops. */
+  private async markPresence(serverId: string | undefined): Promise<void> {
     if (!serverId) return;
     try {
       await markServerSeen(this.env.DB, serverId);
     } catch {}
   }
 
-  async alarm(): Promise<void> {
-    if (!this.tunnelSocket()) {
-      await this.state.storage.delete("serverId");
-      await this.state.storage.delete("protocolVersion");
-      this.clientProtocolVersion = 0;
-      return;
-    }
-    await this.markPresence();
-    await this.state.storage.setAlarm(Date.now() + PRESENCE_INTERVAL_MS);
-  }
+  /** Older relays set a 50 s presence alarm. One may still fire once after a deploy; let it end without rescheduling. */
+  async alarm(): Promise<void> {}
 
   private acceptTunnel(
     request: Request,
@@ -260,17 +241,16 @@ export class TunnelDO {
       } catch {}
     }
     this.abandonStreams("tunnel reconnected mid-request", "tunnel reconnected");
-    this.clientProtocolVersion = protocolVersion;
-    void this.state.storage.put("protocolVersion", protocolVersion);
-    if (serverId) {
-      void this.state.storage.put("serverId", serverId);
-      void this.markPresence();
-      void this.state.storage.setAlarm(Date.now() + PRESENCE_INTERVAL_MS);
-    }
+    void this.markPresence(serverId ?? undefined);
     const mac = new URL(request.url).hostname.split(".")[0];
     console.log({ event: "tunnel_connected", mac });
     const pair = new WebSocketPair();
-    pair[1].serializeAttachment({ connectedAt: Date.now(), mac } satisfies TunnelInfo);
+    pair[1].serializeAttachment({
+      connectedAt: Date.now(),
+      mac,
+      ...(serverId ? { serverId } : {}),
+      protocolVersion,
+    } satisfies TunnelInfo);
     this.state.acceptWebSocket(pair[1], [TUNNEL_TAG]);
     return new Response(null, { status: 101, webSocket: pair[0] });
   }
@@ -607,10 +587,11 @@ export class TunnelDO {
   webSocketClose(ws: WebSocket, code: number, reason: string): void {
     const tags = this.state.getTags(ws);
     if (tags.includes(TUNNEL_TAG)) {
-      const { connectedAt, mac } = (ws.deserializeAttachment() as TunnelInfo | null) ?? {};
+      const { connectedAt, mac, serverId } = tunnelInfo(ws);
       const connectedSeconds = connectedAt ? Math.round((Date.now() - connectedAt) / 1000) : null;
       console.log({ event: "tunnel_closed", mac, code, reason, connectedSeconds });
       if (this.tunnelSocket() !== null) return;
+      void this.markPresence(serverId);
       this.abandonStreams(
         "tunnel disconnected mid-request",
         "tunnel disconnected",

@@ -80,7 +80,11 @@ export function findAcpModelConfigOption(
   configOptions: readonly AcpConfigOption[] | undefined,
 ): AcpConfigOption | undefined {
   const options = configOptions ?? [];
+  // fx 0.0.14+ also tags its "provider" select as category "model", ahead of the real "model" select.
   return (
+    options.find(
+      (option) => option.category === "model" && option.id === "model",
+    ) ??
     options.find((option) => option.category === "model") ??
     options.find((option) => option.id === "model")
   );

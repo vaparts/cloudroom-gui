@@ -175,6 +175,10 @@ export function installCloudroomRoutes(app: Hono, deps: AppDeps): void {
     if (SAFE_SETTINGS_SEARCH.test(query)) deps.telemetry.capture({ name: "settings_search_no_results", properties: { query } });
     return context.json({ ok: true });
   });
+  app.post("/api/v1/cloudroom/bug-report-clicked", (context) => {
+    deps.telemetry.capture({ name: "bug_report_clicked" });
+    return context.json({ ok: true });
+  });
   const viewedUpgradePrompts = new Set<string>();
   app.post("/api/v1/cloudroom/upgrade-prompt", async (context) => {
     const parsed = z.object({ where: z.enum(UPGRADE_PROMPTS), action: z.enum(["viewed", "clicked"]) }).strict().safeParse(await context.req.json().catch(() => null));

@@ -86,6 +86,7 @@ export type TelemetryEvent =
       };
     }
   | { name: "settings_search_no_results"; properties: { query: string } }
+  | { name: "bug_report_clicked" }
   | {
       name: "plugin_installed";
       properties: {

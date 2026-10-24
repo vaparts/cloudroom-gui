@@ -7,7 +7,8 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { nanoid } from "nanoid";
+import { randomId } from "@/lib/random-id";
+import { fetchWithAppSurface } from "@/lib/app-surface";
 import { useQueryClient } from "@tanstack/react-query";
 import { invalidateEnvironmentWorkspaceStateQueries } from "@/hooks/cache-owners/environment-cache-effects";
 import { useMediaQuery } from "@cloudroom/shared-ui/hooks/use-media-query";
@@ -1043,6 +1044,7 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
   const [composerFocusRequestNonce, setComposerFocusRequestNonce] = useState(0);
   // Feedback #116: users could not find how to report bugs. Fill this composer when empty, else a new thread.
   const reportBug = useCallback(() => {
+    void fetchWithAppSurface("/api/v1/cloudroom/bug-report-clicked", { method: "POST" }).catch(() => {});
     if (isPromptDraftEmpty(selectionPromptDraft.getCurrent())) {
       selectionPromptDraft.setDraft({ text: REPORT_BUG_PROMPT, mentions: [], attachments: [] });
       setComposerFocusRequestNonce((nonce) => nonce + 1);
@@ -1092,7 +1094,7 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
       setSentMessageEditHostElement(null);
       setSentMessageEditSession({
         draft: editDraft,
-        operationId: nanoid(),
+        operationId: randomId(),
         target,
         threadId: current.thread.id,
       });

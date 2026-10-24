@@ -1,13 +1,12 @@
-import { customAlphabet } from "nanoid";
+import { randomBytes } from "node:crypto";
 import { GENERATED_ID_ALPHABET, GENERATED_ID_SUFFIX_LENGTH } from "@cloudroom/domain";
 
-const generatePrettyIdSuffix = customAlphabet(
-  GENERATED_ID_ALPHABET,
-  GENERATED_ID_SUFFIX_LENGTH,
-);
-
 function createId(prefix: string): string {
-  return `${prefix}_${generatePrettyIdSuffix()}`;
+  let suffix = "";
+  for (const byte of randomBytes(GENERATED_ID_SUFFIX_LENGTH)) {
+    suffix += GENERATED_ID_ALPHABET[byte % GENERATED_ID_ALPHABET.length];
+  }
+  return `${prefix}_${suffix}`;
 }
 
 export function createHostId(): string {

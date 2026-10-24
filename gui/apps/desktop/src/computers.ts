@@ -13,8 +13,11 @@ export const RELAY_CREDENTIAL_FILE_NAME = "relay-credential.bin";
 const RELAY_HOST = new URL(
   process.env.CLOUDROOM_CONNECT_URL ?? "https://cloudroom.run",
 ).hostname;
-// A Mac that doesn't answer in 5 seconds counts as offline, so the app opens this Mac instead.
+// One try to open another Mac waits up to 5 seconds.
 const OPEN_TIMEOUT_MS = 5_000;
+// A Mac that blinks offline (a relay hiccup, a reconnect) is still the one you picked, so keep trying this long before
+// opening this Mac instead.
+export const OPEN_RETRY_MS = 30_000;
 const LIST_TIMEOUT_MS = 10_000;
 
 const computerSchema = z.object({
